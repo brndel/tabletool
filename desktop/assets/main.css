@@ -1,0 +1,32 @@
+/* body {
+    background-color: #152a5f;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 20px;
+} */
+
+.id-card {
+    font-family: monospace;
+    padding: 1pt 2pt;
+    border-radius: 2pt;
+}
+
+.data-table {
+    /* border: 1pt white solid; */
+    border-collapse: collapse;
+}
+
+.data-table td {
+    border-left: 1pt var(--primary-color-7) solid;
+    border-right: 1pt var(--primary-color-7) solid;
+    padding: 8pt;
+}
+
+
+.data-table tr:nth-child(even) {
+    background-color: var(--primary-color-3);
+}
+
+.data-table tr:hover {
+    background-color: var(--primary-color-4);
+}

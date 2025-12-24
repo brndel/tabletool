@@ -1,0 +1,48 @@
+.modal-dialog {
+    background-color: var(--primary-color-2);
+    color: var(--secondary-color);
+    border: 1pt solid var(--primary-color-5);
+    border-radius: 16pt;
+    padding: 8pt;
+    box-shadow: 4pt 4pt 16pt #000e;
+    flex-direction: column;
+    gap: 4pt;
+    overflow: visible;
+}
+
+.modal-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: start;
+    gap: 8pt;
+}
+
+.modal-header h1 {
+    margin: 0;
+    font-size: 16pt;
+}
+
+.modal-dialog {
+    transition:
+        opacity 0.2s,
+        scale 0.2s,
+        display 0.2s allow-discrete,
+        overlay 0.2s allow-discrete;
+    
+    opacity: 0;
+    scale: 0.95;
+}
+
+.modal-dialog[open] {
+    display: flex;
+    opacity: 1;
+    scale: 1;
+}
+
+@starting-style {
+    .modal-dialog[open] {
+        opacity: 0;
+        scale: 0.95;
+    }
+}

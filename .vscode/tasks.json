@@ -1,0 +1,16 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dioxus serve",
+            "type": "shell",
+            "command": "dx",
+            "args": [
+                "serve",
+                "--hot-reload=true",
+                "--package=desktop"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

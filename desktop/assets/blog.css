@@ -1,0 +1,29 @@
+#blog {
+  margin-top: 50px;
+}
+
+#blog a {
+  color: #ffffff;
+  margin-top: 50px;
+}
+
+.card {
+  background-color: cornflowerblue;
+  padding: 16pt;
+  border-radius: 16pt;
+  border: 2pt solid green;
+}
+
+.anchor {
+  anchor-name: --hey;
+  width: max-content;
+}
+
+.popover {
+  background-color: coral;
+  position: fixed;
+  position-anchor: --hey;
+  position-area: bottom span-right;
+  position-try-fallbacks: bottom span-right, top span-right;
+  /* height: 200pt; */
+}

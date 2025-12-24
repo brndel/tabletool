@@ -1,0 +1,148 @@
+div.dtp-button {
+    display: flex;
+    background-color: var(--primary-color-4);
+    border: none;
+    padding: 2pt;
+    border-radius: 8pt;
+    gap: 2pt;
+    border: 1pt solid var(--primary-color-6);
+}
+
+button.dtp-button {
+    background-color: var(--primary-color-3);
+    color: var(--secondary-color-4);
+    border: none;
+    padding: 4pt 6pt;
+    border-radius: 6pt 2pt 2pt 6pt;
+    border: 1pt solid var(--primary-color-6);
+    display: flex;
+    font-family: monospace;
+    cursor: pointer;
+}
+
+button.dtp-button:last-child {
+    border-radius: 2pt 6pt 6pt 2pt;
+}
+
+
+.dtp-popover {
+    position: fixed;
+    background-color: var(--primary-color-4);
+    color: var(--secondary-color-4);
+    border: none;
+    margin: 0;
+    padding: 4pt;
+    border-radius: 8pt;
+    position-area: bottom span-right;
+
+    transition: opacity 0.2s, scale 0.2s,
+        display 0.2s allow-discrete,
+        overlay 0.2s allow-discrete;
+    
+    translate: 0 4pt;
+
+    opacity: 0;
+    scale: 0.95;
+}
+
+.dtp-popover:popover-open {
+    opacity: 1;
+    scale: 1;
+}
+
+@starting-style {
+    .dtp-popover:popover-open {
+        opacity: 0;
+        /* translate: 0 16pt; */
+        scale: 0.95;
+    }
+}
+
+.dtp-time {
+    font-size: 2rem;
+    display: flex;
+    align-items: center;
+}
+
+.dtp-time input {
+    font-size: 2rem;
+    background-color: var(--primary-color-3);
+    color: var(--secondary-color-3);
+    font-family: monospace;
+    width: 2em;
+    text-align: center;
+    padding: 4pt 6pt;
+    border: 1pt solid var(--primary-color-5);
+    border-radius: 4pt;
+}
+
+.dtp-calendar {
+    display: flex;
+    flex-direction: column;
+    gap: 8pt;
+}
+
+.dtp-header {
+    display: flex;
+    gap: 8pt;
+}
+
+.dtp-pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 4pt;
+
+    /* background-color: var(--primary-color-3); */
+    /* padding: 2pt; */
+    /* border-radius: 4pt; */
+}
+
+.dtp-pill span {
+    flex: 1;
+    text-align: center;
+}
+
+.dtp-pill button {
+    display: flex;
+    border: none;
+    border-radius: 4pt;
+    background-color: var(--primary-color-3);
+    color: var(--secondary-color-3);
+    padding: 4pt;
+}
+
+.dtp-table {
+    border: none;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    width: 200pt;
+    gap: 4pt;
+}
+
+.dtp-table span {
+    text-align: center;
+}
+
+.dtp-table button {
+    height: 20pt;
+    background-color: var(--primary-color-3);
+    color: var(--secondary-color-3);
+    font-weight: bold;
+    border: none;
+    border-radius: 4pt;
+}
+
+
+.dtp-table button.other-month {
+    opacity: 0.5;
+}
+
+.dtp-table button.selected {
+    background-color: var(--secondary-color-3);
+    color: var(--primary-color-4);
+}
+
+.dtp-table button.today {
+    outline: 1pt solid var(--secondary-color-3);
+}

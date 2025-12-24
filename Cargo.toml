@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["ui", "desktop", "db", "bytepack"]
+
+[workspace.dependencies]
+dioxus = { version = "0.7.1" }
+
+# workspace
+ui = { path = "ui" }
+db = { path = "db" }
+bytepack = { path = "bytepack" }
+ulid = "1.2.1"
+chrono = "0.4"
+dioxus-free-icons = { version = "0.10", features = ["font-awesome-brands", "font-awesome-regular", "font-awesome-solid"] }
+thiserror = "2.0"
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
