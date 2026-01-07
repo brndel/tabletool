@@ -3,56 +3,48 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn IdCard(id: Ulid) -> Element {
-    let mut seed = id.0;
-    fn hash(mut seed: u128) -> u128 {
-        seed ^= seed << 7;
-        seed ^= seed >> 9;
-        seed = seed.wrapping_mul(0x9E3779B97F4A7C15u128); // golden ratio magic
-        seed
-    }
-
-    seed = hash(seed);
-
-    const CHARS: &[u8] = b"abcdefghjklmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789";
-
-    let c1 = CHARS[(seed as usize) % CHARS.len()] as char;
-    let c2 = CHARS[((seed >> 8) as usize) % CHARS.len()] as char;
-    let c3 = CHARS[((seed >> 16) as usize) % CHARS.len()] as char;
-    let c4 = CHARS[((seed >> 24) as usize) % CHARS.len()] as char;
-
-    seed = hash(seed);
-
-    let r = ((seed >> 0) & 0xFF) as u8;
-    let g = ((seed >> 8) & 0xFF) as u8;
-    let b = ((seed >> 16) & 0xFF) as u8;
+    let r = ((id.0 >> 0) & 0xFF) as u8;
+    let g = ((id.0 >> 8) & 0xFF) as u8;
+    let b = ((id.0 >> 16) & 0xFF) as u8;
 
     let color = format!("#{r:02X}{g:02X}{b:02X}");
-    let s = format!("{}{}{}{}", c1, c2, c3, c4);
+    let s = id_text(id);
 
     rsx!(span {
         class: "id-card",
         background_color: "{color}",
+        color: if use_white_text(r, g, b) {"#ffffff"} else {"#000000"},
+        title: "{id}",
         "{s}"
     })
 }
 
 pub fn id_text(id: Ulid) -> String {
-    let mut seed = id.0;
-    fn hash(mut seed: u128) -> u128 {
-        seed ^= seed << 7;
-        seed ^= seed >> 9;
-        seed = seed.wrapping_mul(0x9E3779B97F4A7C15u128); // golden ratio magic
-        seed
+    let string = id.to_string();
+
+    let last_4 = &string[string.len()-4..string.len()];
+
+    last_4.to_owned()
+}
+
+pub fn use_white_text(r: u8, g: u8, b: u8) -> bool {
+    fn channel_luminance(c: u8) -> f64 {
+        let c = c as f64 / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     }
 
-    seed = hash(seed);
+    let r = channel_luminance(r);
+    let g = channel_luminance(g);
+    let b = channel_luminance(b);
 
-    const CHARS: &[u8] = b"abcdefghjklmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789";
+    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
-    let c1 = CHARS[(seed as usize) % CHARS.len()] as char;
-    let c2 = CHARS[((seed >> 8) as usize) % CHARS.len()] as char;
-    let c3 = CHARS[((seed >> 16) as usize) % CHARS.len()] as char;
-    let c4 = CHARS[((seed >> 24) as usize) % CHARS.len()] as char;
+    let contrast_black = (luminance + 0.05) / 0.05;
+    let contrast_white = 1.05 / (luminance + 0.05);
 
-    format!("{}{}{}{}", c1, c2, c3, c4)
+    contrast_white > contrast_black
 }

@@ -1,7 +1,8 @@
+use db_core::record::RecordBytes;
 use redb::{ReadableTable, Value};
 use ulid::Ulid;
 
-use crate::{Db, RecordBytes, db::TableWithIdDef, error::DbError};
+use crate::{Db, db::TableWithIdDef, error::DbError};
 
 impl Db {
     pub fn insert_record(&self, table_name: &str, record: &RecordBytes) -> Result<(), DbError> {

@@ -5,10 +5,12 @@ edition = "2021"
 
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
-ui = { workspace = true }
-db = { workspace = true }
-bytepack = { workspace = true }
 chrono.workspace = true
+ui.workspace = true
+bytepack.workspace = true
+db.workspace = true
+db_core.workspace = true
+query_parse.workspace = true
 
 [features]
 default = ["desktop"]

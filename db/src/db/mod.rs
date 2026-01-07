@@ -2,7 +2,9 @@ mod table_ext;
 mod record_ext;
 mod index_ext;
 mod trigger_ext;
+mod query_ext;
 
+use db_core::record::RecordBytes;
 pub use index_ext::*;
 pub use trigger_ext::*;
 
@@ -15,7 +17,7 @@ use std::{
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use ulid::Ulid;
 
-use crate::{Table, db::table_ext::DbTables, record::RecordBytes};
+use crate::{Table, db::table_ext::DbTables};
 
 #[derive(Clone)]
 pub struct Db {
@@ -85,8 +87,6 @@ impl Db {
                 let id = Ulid(id);
 
                 let bytes = value.value();
-
-                // let string = str::from_utf8(bytes).ok()?.to_owned();
 
                 result.push(RecordBytes::new(id, bytes.to_owned()));
             }

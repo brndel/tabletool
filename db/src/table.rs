@@ -5,7 +5,11 @@ use std::{
 
 use bytepack::{Pack, PackerField, PackerFormat, Unpack};
 
-use crate::{Db, db::{IndexDef, IndexOnDelete}, field_type::FieldType};
+use crate::{
+    Db,
+    db::{IndexDef, IndexOnDelete},
+    field_type::FieldType,
+};
 
 pub struct NamedTable {
     pub name: Arc<str>,
@@ -88,13 +92,29 @@ impl NamedTable {
         let mut result = Vec::with_capacity(2);
 
         for field in &self.table.fields {
-            match &field.ty {
-                FieldType::Record { table_name } => {
-                    let index_name = format!("#{}:{}", self.name, field.name);
+            let index_name = format!("#{}:{}", self.name, field.name);
 
-                    result.push(IndexDef::new(index_name.into(), self.name.clone(), field.name.clone(), IndexOnDelete::Cascase));
-                },
-                _ => ()
+            match &field.ty {
+                FieldType::Record { .. } => {
+
+                    result.push(IndexDef::new(
+                        index_name.into(),
+                        self.name.clone(),
+                        field.name.clone(),
+                        IndexOnDelete::Cascase,
+                    ));
+                    continue;
+                }
+                _ => (),
+            }
+
+            if field.has_index {
+                result.push(IndexDef::new(
+                    index_name.into(),
+                    self.name.clone(),
+                    field.name.clone(),
+                    IndexOnDelete::None,
+                ));
             }
         }
 
@@ -112,13 +132,15 @@ pub enum TableCreateErr {
 pub struct TableField {
     pub name: Arc<str>,
     pub ty: FieldType,
+    pub has_index: bool,
 }
 
 impl TableField {
-    pub fn new(name: impl Into<Arc<str>>, ty: FieldType) -> Self {
+    pub fn new(name: impl Into<Arc<str>>, ty: FieldType, has_index: bool) -> Self {
         Self {
             name: name.into(),
             ty,
+            has_index,
         }
     }
 
@@ -145,29 +167,32 @@ static TABLE_FIELD_FORMAT: LazyLock<PackerFormat> = LazyLock::new(|| {
         [
             PackerField::new("name", Arc::<str>::PACK_BYTES),
             PackerField::new("ty", FieldType::PACK_BYTES),
+            PackerField::new("has_index", bool::PACK_BYTES),
         ]
         .into_iter(),
     )
 });
 
 impl Pack for TableField {
-    const PACK_BYTES: u32 = Cow::<str>::PACK_BYTES + FieldType::PACK_BYTES;
+    const PACK_BYTES: u32 = Cow::<str>::PACK_BYTES + FieldType::PACK_BYTES + bool::PACK_BYTES;
 
     fn pack(&self, offset: u32, packer: &mut bytepack::BytePacker) {
-        let mut packer = packer.fields(&TABLE_FIELD_FORMAT, offset);
+        let mut packer = packer.fields(&*TABLE_FIELD_FORMAT, offset);
 
         packer.pack("name", &self.name);
         packer.pack("ty", &self.ty);
+        packer.pack("has_index", &self.has_index);
     }
 }
 
 impl<'b> Unpack<'b> for TableField {
     fn unpack(offset: u32, unpacker: &bytepack::ByteUnpacker<'b>) -> Option<Self> {
-        let unpacker = unpacker.fields(&TABLE_FIELD_FORMAT, offset);
+        let unpacker = unpacker.fields(&*TABLE_FIELD_FORMAT, offset);
 
         Some(Self {
             name: unpacker.unpack("name")?,
             ty: unpacker.unpack("ty")?,
+            has_index: unpacker.unpack("has_index")?,
         })
     }
 }
@@ -186,7 +211,7 @@ impl Pack for Table {
     const PACK_BYTES: u32 = Vec::<TableField>::PACK_BYTES + Option::<Arc<str>>::PACK_BYTES;
 
     fn pack(&self, offset: u32, packer: &mut bytepack::BytePacker) {
-        let mut packer = packer.fields(&TABLE_FORMAT, offset);
+        let mut packer = packer.fields(&*TABLE_FORMAT, offset);
 
         packer.pack("fields", &self.fields);
         packer.pack("main_display_field", &self.main_display_field);
@@ -195,7 +220,7 @@ impl Pack for Table {
 
 impl<'b> Unpack<'b> for Table {
     fn unpack(offset: u32, unpacker: &bytepack::ByteUnpacker<'b>) -> Option<Self> {
-        let unpacker = unpacker.fields(&TABLE_FORMAT, offset);
+        let unpacker = unpacker.fields(&*TABLE_FORMAT, offset);
 
         Some(Self {
             fields: unpacker.unpack("fields")?,
@@ -213,7 +238,7 @@ mod tests {
     #[test]
     fn pack_unpack() {
         let table = Table::new(
-            vec![TableField::new("name", FieldType::Text)],
+            vec![TableField::new("name", FieldType::Text, false)],
             Some("name".into()),
         )
         .unwrap();

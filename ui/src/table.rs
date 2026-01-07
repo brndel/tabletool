@@ -1,7 +1,10 @@
-use bytepack::{ByteUnpacker, FieldWithPointer, PackPointer, PackerField, PackerFormat, Unpack};
-use chrono::{DateTime, Local};
-use db::{Db, FieldType, NumberFieldType, RecordBytes, Table, TableField, Ulid};
-use dioxus::{html::render_template_to_html, prelude::*};
+use std::sync::Arc;
+
+use bytepack::{ByteUnpacker, FieldWithPointer, PackFormat, PackPointer, Unpack};
+use chrono::{DateTime, Local, Utc};
+use db::{Db, FieldType, FieldValue, NumberFieldType, Table, TableField, Ulid};
+use db_core::record::RecordBytes;
+use dioxus::prelude::*;
 
 use crate::{
     components::{
@@ -19,6 +22,7 @@ pub fn DataTable(
     items: ReadSignal<Vec<RecordBytes>>,
     delete: Callback<Ulid, ()>,
     table: ReadSignal<Table>,
+    table_name: String,
 ) -> Element {
     let mut is_delete_dialog_open = use_signal(|| None);
     let mut selected_id = use_signal(|| None);
@@ -37,9 +41,35 @@ pub fn DataTable(
                     th {"Id"}
                     for field in table().fields().iter() {
                         th {
-                            "{field.name()}"
-                            if Some(field.name()) == display_field {
-                                "*"
+                            Button {
+                                onclick: {
+                                    let has_index = field.has_index;
+                                    let field_name = field.name.clone();
+                                    let db = db.clone();
+                                    let table_name = table_name.clone();
+                                    move |_| if has_index {
+                                        let query_result = db.index_query(&format!("#{}:{}", table_name, field_name), Some(db::FieldValue::DateTime(Utc::now())), None);
+
+                                        match query_result {
+                                            Ok(result) => {
+                                                for (index_value, record_key) in result {
+                                                    println!("{:?}:{}", index_value, record_key);
+                                                }
+                                            }
+                                            Err(err) => {
+                                                println!("ERROR: {err}");
+                                            }
+                                        }
+                                    }
+                                },
+                                variant: ButtonVariant::Ghost,
+                                if field.has_index {
+                                    "#"
+                                }
+                                "{field.name()}"
+                                if Some(field.name()) == display_field {
+                                    "*"
+                                }
                             }
                         }
                     }
@@ -157,7 +187,7 @@ pub fn unpack_to_string(
 
                 let unpacker = ByteUnpacker::new(value.bytes());
                 let value = unpack_to_string(offset, &unpacker, ty, &db);
-                // unpacker.unpack("name")
+
                 value.unwrap_or_default()
             } else {
                 id_text(id)

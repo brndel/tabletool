@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use db_core::record::RecordBytes;
 use redb::WriteTransaction;
 
-use crate::{Db, RecordBytes, error::DbError};
+use crate::{Db, error::DbError};
 
 #[derive(Debug, Clone)]
 pub enum DbTrigger {
@@ -12,9 +13,18 @@ pub enum DbTrigger {
 
 #[derive(Debug, Clone)]
 pub enum TriggerAction {
-    Println { text: String },
-    InsertIntoIndex { index_name: Arc<str> },
-    DeleteFromIndex { index_name: Arc<str> },
+    Println {
+        text: String,
+    },
+    InsertIntoIndex {
+        index_name: Arc<str>,
+    },
+    DeleteValueFromIndex {
+        index_name: Arc<str>,
+    },
+    DeleteKeyFromIndex {
+        index_name: Arc<str>,
+    },
 }
 
 impl Db {
@@ -96,8 +106,11 @@ impl Db {
             TriggerAction::InsertIntoIndex { index_name } => {
                 self.index_insert(tx, &index_name, record)
             }
-            TriggerAction::DeleteFromIndex { index_name } => {
-                self.index_delete(tx, &index_name, &record.id())
+            TriggerAction::DeleteValueFromIndex { index_name } => {
+                self.index_delete_value(tx, &index_name, record)
+            }
+            TriggerAction::DeleteKeyFromIndex { index_name } => {
+                self.index_delete_key(tx, &index_name, &record.id())
             }
         }
     }

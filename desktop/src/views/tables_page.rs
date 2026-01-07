@@ -1,6 +1,7 @@
+use db_core::record::RecordBytes;
 use dioxus::prelude::*;
 
-use db::{Db, RecordBytes, Ulid};
+use db::{Db, Ulid};
 
 use ui::{
     alert_dialog::{
@@ -126,7 +127,8 @@ pub fn TablePage(name: String) -> Element {
             DataTable {
                 items: records,
                 delete: delete_record.clone(),
-                table: table_format
+                table: table_format,
+                table_name: table_name(),
             }
         } else {
             "Invalid Table"

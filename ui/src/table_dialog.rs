@@ -1,5 +1,8 @@
 use db::{FieldType, NamedTable, NumberFieldType, Table, TableField};
 use dioxus::prelude::*;
+use dioxus_free_icons::{
+    Icon, icons::fa_solid_icons::{FaEye, FaEyeSlash, FaHashtag}
+};
 
 use crate::{
     alert_dialog::{AlertDialogContent, AlertDialogDescription, AlertDialogRoot, AlertDialogTitle},
@@ -27,7 +30,7 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
 
         let fields: Vec<TableField> = fields
             .iter()
-            .map(|field| TableField::new(field.name.clone(), field.ty.clone()))
+            .map(|field| TableField::new(field.name.clone(), field.ty.clone(), field.has_index))
             .collect();
 
         let main_display_field_name =
@@ -77,7 +80,7 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
                             variant: ButtonVariant::Outline,
                             onclick: move |ev: Event<MouseData>| {
                                 ev.prevent_default();
-                                fields.push(FieldStore { name: String::new(), ty: FieldType::Text });
+                                fields.push(FieldStore { name: String::new(), ty: FieldType::Text, has_index: false });
                             },
                             "New Field"
                         }
@@ -86,7 +89,12 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
                     Button {
                         onclick: move |_| main_display_field_idx.set(None),
                         variant: if main_display_field_idx() == None { ButtonVariant::Ghost } else { ButtonVariant::Secondary },
-                        "Reset Display Field"
+                        Icon {
+                            width: 12,
+                            height: 12,
+                            icon: FaEyeSlash,
+                        }
+                        "No Display Field"
                     }
 
                     for (idx, field) in fields.iter().enumerate() {
@@ -98,7 +106,20 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
                             Button {
                                 onclick: move |_| main_display_field_idx.set(Some(idx)),
                                 variant: if main_display_field_idx() == Some(idx) { ButtonVariant::Primary } else { ButtonVariant::Secondary },
-                                "Display"
+                                Icon {
+                                    width: 12,
+                                    height: 12,
+                                    icon: FaEye,
+                                }
+                            }
+                            Button {
+                                onclick: move |_| field.has_index().toggle(),
+                                variant: if field.has_index()() { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                                Icon {
+                                    width: 12,
+                                    height: 12,
+                                    icon: FaHashtag,
+                                }
                             }
                             Input { placeholder: "Name", value: "{field.name()}", autocorrect: "off", flex: "1", oninput: {let mut name = field.name(); move |ev: Event<FormData>| {name.set(ev.value())}} }
                             FieldTypeSelect { value: field.ty() }
@@ -121,6 +142,7 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
 struct FieldStore {
     name: String,
     ty: FieldType,
+    has_index: bool,
 }
 
 #[component]
@@ -143,7 +165,7 @@ pub fn FieldTypeSelect(value: Store<FieldType>) -> Element {
         FieldType::Number(NumberFieldType::U128),
         // FieldType::Number(NumberFieldType::I8),
         // FieldType::Number(NumberFieldType::I16),
-        // FieldType::Number(NumberFieldType::I32),
+        FieldType::Number(NumberFieldType::I32),
         FieldType::Number(NumberFieldType::I64),
         // FieldType::Number(NumberFieldType::I128),
     ];

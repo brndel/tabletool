@@ -40,7 +40,7 @@ pub fn Home() -> Element {
             db.register_table(NamedTable::new(
                 "project_group",
                 Table::new(
-                    vec![TableField::new(name_field.clone(), db::FieldType::Text)],
+                    vec![TableField::new(name_field.clone(), db::FieldType::Text, false)],
                     Some(name_field.clone()),
                 )
                 .unwrap(),
@@ -50,12 +50,13 @@ pub fn Home() -> Element {
                 "project",
                 Table::new(
                     vec![
-                        TableField::new(name_field.clone(), db::FieldType::Text),
+                        TableField::new(name_field.clone(), db::FieldType::Text, false),
                         TableField::new(
                             "group",
                             db::FieldType::Record {
                                 table_name: "project_group".into(),
                             },
+                            false,
                         ),
                     ],
                     Some(name_field),
@@ -72,8 +73,11 @@ pub fn Home() -> Element {
                             db::FieldType::Record {
                                 table_name: "project".into(),
                             },
+                            false,
                         ),
-                        TableField::new("notes", db::FieldType::Text),
+                        TableField::new("start_time", db::FieldType::DateTime, true),
+                        TableField::new("end_time", db::FieldType::DateTime, true),
+                        TableField::new("notes", db::FieldType::Text, false),
                     ],
                     None,
                 )

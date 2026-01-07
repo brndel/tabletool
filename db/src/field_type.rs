@@ -256,7 +256,7 @@ impl Display for FieldType {
 #[cfg(test)]
 mod tests {
 
-    use bytepack::{BytePacker, ByteUnpacker, PackerFormat};
+    use bytepack::{BytePacker, ByteUnpacker, PackFormat, PackerFormat};
 
     use crate::table::TableField;
 
@@ -287,6 +287,7 @@ mod tests {
                         FieldType::Number(NumberFieldType::U8), // Any type is okay here, since only the PACK_SIZE of TableType::List is relevant
                     ),
                 },
+                false,
             )]
             .into_iter()
             .map(Into::into),

@@ -1,11 +1,9 @@
 
 
-use std::fs;
-
 use dioxus::prelude::*;
 
 use ui::Navbar;
-use views::{Info, Home, TablePage};
+use views::{Info, Home, TablePage, ViewsPage, ExprPage};
 
 mod views;
 
@@ -17,6 +15,10 @@ enum Route {
     Home {},
     #[route("/table/:name")]
     TablePage { name: String },
+    #[route("/view/:name")]
+    ViewsPage { name: String },
+    #[route("/expr")]
+    ExprPage {  },
     #[route("/info")]
     Info { },
 }
@@ -57,6 +59,10 @@ fn DesktopNavbar() -> Element {
             Link {
                 to: Route::Info {},
                 "Info"
+            }
+            Link {
+                to: Route::ExprPage {},
+                "Expr"
             }
         }
 

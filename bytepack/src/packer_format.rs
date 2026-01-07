@@ -2,6 +2,17 @@ use std::sync::Arc;
 
 use crate::PackPointer;
 
+pub trait PackFormat {
+    type Field: PackField;
+
+    fn field<'a>(&'a self, name: &str) -> Option<&'a Self::Field>;
+    fn fixed_byte_count(&self) -> u32;
+}
+
+pub trait PackField {
+    fn offset(&self) -> u32;
+}
+
 pub struct PackerField {
     pub name: Arc<str>,
     pub size: u32,
@@ -29,27 +40,26 @@ pub struct PackerFormat {
 }
 
 impl PackerFormat {
-    pub fn new(fields: impl Iterator<Item = PackerField>) -> Self {
-        let mut ptr_fields = Vec::new();
-        let mut total_offset = 0;
+    pub fn new(fields: impl IntoIterator<Item = PackerField>) -> Self {
+        let mut offset = 0;
 
-        for field in fields {
-            let offset = total_offset;
-            let byte_count = field.size;
-            total_offset += byte_count;
-
-            ptr_fields.push(FieldWithPointer {
+        let fields = fields.into_iter().map(|field| {
+            let field = FieldWithPointer {
                 name: field.name.clone(),
                 pointer: PackPointer {
                     offset,
-                    len: byte_count,
+                    len: field.size,
                 },
-            });
-        }
+            };
+
+            offset += field.pointer.len;
+
+            field
+        });
 
         Self {
-            fields: ptr_fields.into(),
-            fixed_len_byte_count: total_offset,
+            fields: fields.collect(),
+            fixed_len_byte_count: offset,
         }
     }
 
@@ -60,15 +70,33 @@ impl PackerFormat {
         }
     }
 
-    pub const fn fixed_byte_count(&self) -> u32 {
-        self.fixed_len_byte_count
-    }
-
-    pub fn field<'b>(&'b self, name: &str) -> Option<&'b FieldWithPointer> {
-        self.fields.iter().filter(|field| field.name.as_ref() == name).next()
-    }
-
     pub fn fields<'b>(&'b self) -> &'b [FieldWithPointer] {
         self.fields.as_ref()
     }
+}
+
+impl PackFormat for PackerFormat {
+    type Field = FieldWithPointer;
+
+    fn field<'a>(&'a self, name: &str) -> Option<&'a Self::Field> {
+        self.fields
+            .iter()
+            .filter(|field| field.name.as_ref() == name)
+            .next()
+    }
+
+    fn fixed_byte_count(&self) -> u32 {
+        self.fixed_len_byte_count
+    }
+}
+
+impl PackField for FieldWithPointer {
+    fn offset(&self) -> u32 {
+        self.pointer.offset
+    }
+}
+
+
+pub trait HasPackerFormat {
+    fn packer_format() -> &'static PackerFormat;
 }

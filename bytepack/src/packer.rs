@@ -1,14 +1,14 @@
 use std::iter::repeat;
 
-use crate::{PackerFormat, pack::Pack, pack_pointer::PackPointer};
+use crate::{PackField, PackFormat, pack::Pack, pack_pointer::PackPointer};
 
 pub struct BytePacker {
     bytes: Vec<u8>,
 }
 
-pub struct FieldPacker<'b, 'f> {
+pub struct FieldPacker<'b, 'f, F> {
     bytes: &'b mut BytePacker,
-    format: &'f PackerFormat,
+    format: &'f F,
     offset: u32,
 }
 
@@ -17,11 +17,11 @@ impl BytePacker {
         BytePacker { bytes: vec![0; fixed_byted_count as usize] }
     }
 
-    pub fn fields<'b, 'f>(
+    pub fn fields<'b, 'f, F>(
         &'b mut self,
-        format: &'f PackerFormat,
+        format: &'f F,
         offset: u32,
-    ) -> FieldPacker<'b, 'f> {
+    ) -> FieldPacker<'b, 'f, F> {
         FieldPacker {
             bytes: self,
             format,
@@ -73,15 +73,14 @@ impl BytePacker {
     }
 }
 
-impl<'b, 'f> FieldPacker<'b, 'f> {
+impl<'b, 'f, F: PackFormat> FieldPacker<'b, 'f, F> {
     pub fn pack<T: Pack + ?Sized>(&mut self, name: &str, value: &T) {
         let Some(field) = self.format.field(name) else {
             return;
         };
 
-        assert!(T::PACK_BYTES == 0 || field.pointer.len == T::PACK_BYTES);
 
-        value.pack(field.pointer.offset + self.offset, self.bytes);
+        value.pack(field.offset() + self.offset, self.bytes);
     }
 }
 

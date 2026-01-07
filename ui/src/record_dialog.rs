@@ -1,21 +1,20 @@
 use std::{str::FromStr, sync::Arc};
 
-use bytepack::{BytePacker, ByteUnpacker};
-use chrono::{DateTime, Utc};
-use db::{Db, FieldType, FieldValue, NumberFieldType, RecordBytes, Table, Ulid};
+use bytepack::{BytePacker, ByteUnpacker, PackFormat};
+use chrono::{DateTime, Timelike, Utc};
+use db::{Db, FieldType, FieldValue, NumberFieldType, Table, Ulid};
+use db_core::record::RecordBytes;
 use dioxus::prelude::*;
 
 use crate::{
     button::ButtonVariant,
     components::{
-        button::Button,
-        dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle},
         input::Input,
         label::Label,
     },
     date_time_picker::DateTimePicker,
     id_card::id_text,
-    modal_button::{ModalButton, ModalCloseButton, ModalContent, ModalCtx, ModalRoot},
+    modal_button::{ModalButton, ModalCloseButton, ModalContent, ModalRoot},
     select::{
         Select, SelectGroup, SelectGroupLabel, SelectItemIndicator, SelectList, SelectOption,
         SelectTrigger, SelectValue,
@@ -231,7 +230,7 @@ impl RecordField {
                     String::new(),
                     StringFieldType::Number(num),
                 )),
-                FieldType::DateTime => RecordFieldValue::DateTime(Utc::now()),
+                FieldType::DateTime => RecordFieldValue::DateTime(Utc::now().with_second(0).unwrap().with_nanosecond(0).unwrap()),
                 FieldType::Text => RecordFieldValue::Text(String::new()),
                 FieldType::Record { table_name } => RecordFieldValue::Record {
                     table_name,
@@ -249,14 +248,6 @@ impl RecordField {
             RecordFieldValue::Text(text) => Some(FieldValue::Text(text.clone())),
             RecordFieldValue::StringField(field) => field.value.as_ref().ok().cloned(),
             RecordFieldValue::Record { id, .. } => id.map(|id| FieldValue::RecordId(id)),
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        match &self.value {
-            RecordFieldValue::DateTime(_) | RecordFieldValue::Text(_) => true,
-            RecordFieldValue::StringField(field) => field.value.is_ok(),
-            RecordFieldValue::Record { id, .. } => id.is_some(),
         }
     }
 }
