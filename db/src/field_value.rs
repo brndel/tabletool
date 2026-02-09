@@ -15,6 +15,7 @@ pub enum FieldValue {
     I32(i32),
     I64(i64),
     I128(i128),
+    Bool(bool),
     DateTime(DateTime<Utc>),
     RecordId(Ulid),
 }
@@ -35,6 +36,7 @@ impl Pack for FieldValue {
             FieldValue::I32(value) => value.pack(offset, packer),
             FieldValue::I64(value) => value.pack(offset, packer),
             FieldValue::I128(value) => value.pack(offset, packer),
+            FieldValue::Bool(value) => value.pack(offset, packer),
             FieldValue::DateTime(value) => value.pack(offset, packer),
             FieldValue::RecordId(value) => value.pack(offset, packer),
         }

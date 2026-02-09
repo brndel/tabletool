@@ -1,7 +1,12 @@
-use db::{FieldType, NamedTable, NumberFieldType, Table, TableField};
+use db_core::{
+    defs::table::{TableDef, TableFieldDef},
+    named::Named,
+    ty::FieldTy,
+};
 use dioxus::prelude::*;
 use dioxus_free_icons::{
-    Icon, icons::fa_solid_icons::{FaEye, FaEyeSlash, FaHashtag}
+    icons::fa_solid_icons::{FaEye, FaEyeSlash, FaHashtag},
+    Icon,
 };
 
 use crate::{
@@ -17,7 +22,7 @@ use crate::{
 };
 
 #[component]
-pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
+pub fn TableDialogButton(on_submit: Callback<Named<TableDef>, ()>) -> Element {
     let mut open: Signal<bool> = use_signal(|| false);
 
     let mut name = use_signal(|| String::new());
@@ -28,23 +33,29 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
         let name = name.peek();
         let fields = fields.peek();
 
-        let fields: Vec<TableField> = fields
+        let fields = fields
             .iter()
-            .map(|field| TableField::new(field.name.clone(), field.ty.clone(), field.has_index))
+            .map(|field| (field.name.clone().into(), TableFieldDef { ty: field.ty.clone() }))
             .collect();
 
-        let main_display_field_name =
-            main_display_field_idx().and_then(|idx| Some(fields.get(idx)?.name.clone()));
+        // let main_display_field_name =
+        //     main_display_field_idx().and_then(|idx| Some(fields.get(idx)?.name.clone()));
 
-        match Table::new(fields, main_display_field_name) {
-            Ok(table) => {
-                on_submit(NamedTable::new(name.as_ref(), table));
-                open.set(false);
-            }
-            Err(err) => {
-                error!("couldnt create table {:?}", err);
-            }
-        }
+        let table = TableDef { fields };
+
+        on_submit(Named {
+            name: name.clone().into(),
+            value: table,
+        });
+        
+        open.set(false);
+        // match Table::new(fields, main_display_field_name) {
+        //     Ok(table) => {
+        //     }
+        //     Err(err) => {
+        //         error!("couldnt create table {:?}", err);
+        //     }
+        // }
     };
 
     rsx! {
@@ -80,7 +91,7 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
                             variant: ButtonVariant::Outline,
                             onclick: move |ev: Event<MouseData>| {
                                 ev.prevent_default();
-                                fields.push(FieldStore { name: String::new(), ty: FieldType::Text, has_index: false });
+                                fields.push(FieldStore { name: String::new(), ty: FieldTy::Text, has_index: false });
                             },
                             "New Field"
                         }
@@ -141,12 +152,12 @@ pub fn TableDialogButton(on_submit: Callback<NamedTable, ()>) -> Element {
 #[derive(Store)]
 struct FieldStore {
     name: String,
-    ty: FieldType,
+    ty: FieldTy,
     has_index: bool,
 }
 
 #[component]
-pub fn FieldTypeSelect(value: Store<FieldType>) -> Element {
+pub fn FieldTypeSelect(value: Store<FieldTy>) -> Element {
     let mut picker_value = use_signal(|| Some(Some(value())));
 
     use_effect(move || {
@@ -158,21 +169,20 @@ pub fn FieldTypeSelect(value: Store<FieldType>) -> Element {
     });
 
     let numbers = [
-        FieldType::Number(NumberFieldType::U8),
+        FieldTy::IntI32,
         // FieldType::Number(NumberFieldType::U16),
         // FieldType::Number(NumberFieldType::U32),
         // FieldType::Number(NumberFieldType::U64),
-        FieldType::Number(NumberFieldType::U128),
         // FieldType::Number(NumberFieldType::I8),
         // FieldType::Number(NumberFieldType::I16),
-        FieldType::Number(NumberFieldType::I32),
-        FieldType::Number(NumberFieldType::I64),
+        // FieldType::Number(NumberFieldType::I32),
+        // FieldType::Number(NumberFieldType::I64),
         // FieldType::Number(NumberFieldType::I128),
     ];
 
     let number_options = numbers.iter().enumerate().map(|(idx, value)| {
         rsx! {
-            SelectOption::<FieldType> {
+            SelectOption::<FieldTy> {
                 index: idx,
                 value: value.clone(),
                 text_value: "{value:?}",
@@ -182,17 +192,17 @@ pub fn FieldTypeSelect(value: Store<FieldType>) -> Element {
         }
     });
 
-    if let FieldType::Record { table_name } = value() {
+    if let FieldTy::RecordId { table_name } = value() {
         rsx! {
             Input {
                 value: "{table_name}",
                 autocorrect: "off",
-                oninput: move |ev: Event<FormData>| value.set(FieldType::Record {table_name: ev.value().into()})
+                oninput: move |ev: Event<FormData>| value.set(FieldTy::RecordId {table_name: ev.value().into()})
             }
         }
     } else {
         rsx! {
-            Select::<FieldType> { placeholder: "Select a type",
+            Select::<FieldTy> { placeholder: "Select a type",
                 value: picker_value,
                 on_value_change: move |v| picker_value.set(Some(v)),
                 SelectTrigger { aria_label: "Select Trigger", width: "12rem", SelectValue {} }
@@ -203,26 +213,26 @@ pub fn FieldTypeSelect(value: Store<FieldType>) -> Element {
                     }
                     SelectGroup {
                         SelectGroupLabel { "Other" }
-                        SelectOption::<FieldType> {
+                        SelectOption::<FieldTy> {
                             index: numbers.len(),
-                            value: FieldType::Text,
+                            value: FieldTy::Text,
                             text_value: "Text",
                             "Text"
                             SelectItemIndicator {}
                         }
-                        SelectOption::<FieldType> {
+                        SelectOption::<FieldTy> {
                             index: numbers.len() + 1,
-                            value: FieldType::DateTime,
-                            text_value: "DateTime",
-                            "DateTime"
+                            value: FieldTy::Timestamp,
+                            text_value: "Timestamp",
+                            "Timestamp"
                             SelectItemIndicator {}
                         }
                     }
                     SelectGroup {
                         SelectGroupLabel { "Record" }
-                        SelectOption::<FieldType> {
+                        SelectOption::<FieldTy> {
                             index: numbers.len() + 2,
-                            value: FieldType::Record { table_name: String::new().into() },
+                            value: FieldTy::RecordId { table_name: String::new().into() },
                             text_value: "Record",
                             "Record"
                             SelectItemIndicator {}

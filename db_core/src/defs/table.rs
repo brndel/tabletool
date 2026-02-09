@@ -3,9 +3,9 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use bytepack::{HasPackerFormat, Pack, PackField, PackFormat, PackerField, PackerFormat};
+use bytepack::{HasPackerFormat, Pack, PackField, PackFormat, PackerField, PackerFormat, Unpack};
 
-use crate::ty::FieldTy;
+use crate::{defs::index::IndexDef, ty::FieldTy};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TableDef {
@@ -51,6 +51,40 @@ impl From<TableDef> for TableData {
     }
 }
 
+impl TableData {
+    pub fn indices(&self, table_name: &Arc<str>) -> Vec<IndexDef> {
+        let mut result = Vec::with_capacity(2);
+
+        for (field_name, field) in &self.fields {
+            let index_name = format!("#{}:{}", table_name, field_name);
+
+            match field.ty {
+                FieldTy::RecordId { .. } => {
+                    result.push(IndexDef {
+                        index_name: index_name.into(),
+                        table_name: table_name.clone(),
+                        field_name: field_name.clone(),
+                        on_delete: crate::defs::index::IndexOnDelete::Cascase,
+                    });
+                    continue;
+                }
+                _ => (),
+            }
+
+            // if field.has_index {
+            //     result.push(IndexDef::new(
+            //         index_name.into(),
+            //         self.name.clone(),
+            //         field.name.clone(),
+            //         IndexOnDelete::None,
+            //     ));
+            // }
+        }
+
+        result
+    }
+}
+
 impl PackFormat for TableData {
     type Field = TableFieldData;
 
@@ -85,5 +119,31 @@ impl Pack for TableFieldDef {
         let mut packer = packer.fields(Self::packer_format(), offset);
 
         packer.pack("ty", &self.ty);
+    }
+}
+
+impl<'b> Unpack<'b> for TableFieldDef {
+    fn unpack(offset: u32, unpacker: &bytepack::ByteUnpacker<'b>) -> Option<Self> {
+        let unpacker = unpacker.fields(Self::packer_format(), offset);
+
+        Some(Self {
+            ty: unpacker.unpack("ty")?,
+        })
+    }
+}
+
+impl Pack for TableDef {
+    const PACK_BYTES: u32 = BTreeMap::<Arc<str>, TableFieldDef>::PACK_BYTES;
+
+    fn pack(&self, offset: u32, packer: &mut bytepack::BytePacker) {
+        self.fields.pack(offset, packer);
+    }
+}
+
+impl<'b> Unpack<'b> for TableDef {
+    fn unpack(offset: u32, unpacker: &bytepack::ByteUnpacker<'b>) -> Option<Self> {
+        Some(Self {
+            fields: Unpack::unpack(offset, unpacker)?,
+        })
     }
 }

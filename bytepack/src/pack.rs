@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 use chrono::{Timelike, Utc};
 use ulid::Ulid;
@@ -194,39 +194,125 @@ where
     }
 }
 
+// ---------- refs & tuples ----------
+
+impl<T: Pack> Pack for &T {
+    const PACK_BYTES: u32 = T::PACK_BYTES;
+
+    fn pack(&self, offset: u32, packer: &mut BytePacker) {
+        T::pack(&self, offset, packer);
+    }
+}
+
+impl<T: Pack> Pack for &mut T {
+    const PACK_BYTES: u32 = T::PACK_BYTES;
+
+    fn pack(&self, offset: u32, packer: &mut BytePacker) {
+        T::pack(&self, offset, packer);
+    }
+}
+
+impl<T1: Pack, T2: Pack> Pack for (T1, T2) {
+    const PACK_BYTES: u32 = T1::PACK_BYTES + T2::PACK_BYTES;
+
+    fn pack(&self, offset: u32, packer: &mut BytePacker) {
+        let (v1, v2) = self;
+
+        v1.pack(offset, packer);
+        v2.pack(offset + T1::PACK_BYTES, packer);
+    }
+}
+
+impl<'b, T1: Unpack<'b> + Pack, T2: Unpack<'b>> Unpack<'b> for (T1, T2) {
+    fn unpack(offset: u32, unpacker: &ByteUnpacker<'b>) -> Option<Self> {
+        let v1 = T1::unpack(offset, unpacker)?;
+        let v2 = T2::unpack(offset + T1::PACK_BYTES, unpacker)?;
+
+        Some((v1, v2))
+    }
+}
+
+// ---------- collections ----------
+
 impl<T: Pack> Pack for Vec<T> {
     const PACK_BYTES: u32 = PackPointer::PACK_BYTES;
 
     fn pack(&self, offset: u32, packer: &mut BytePacker) {
-        let needed_bytes = T::PACK_BYTES as usize * self.len();
-
-        let ptr = packer.push_dynamic(vec![0; needed_bytes].as_ref());
-        ptr.pack(offset, packer);
-
-        for (i, v) in self.iter().enumerate() {
-            let offset = ptr.offset + i as u32 * T::PACK_BYTES;
-
-            v.pack(offset, packer);
-        }
+        pack_iter(offset, packer, self.iter());
     }
 }
 
 impl<'b, T: Pack + Unpack<'b>> Unpack<'b> for Vec<T> {
     fn unpack(offset: u32, unpacker: &ByteUnpacker<'b>) -> Option<Self> {
-        let ptr = PackPointer::unpack(offset, unpacker)?;
+        let iter = unpack_iter(offset, unpacker)?;
 
-        let count = ptr.len / T::PACK_BYTES;
-
-        let mut values = Vec::with_capacity(count as usize);
-
-        for i in 0..count {
-            let offset = ptr.offset + i * T::PACK_BYTES;
-
-            values.push(T::unpack(offset, unpacker)?);
-        }
-
-        Some(values)
+        iter.collect()
     }
+}
+
+impl<K: Pack, V: Pack> Pack for BTreeMap<K, V> {
+    const PACK_BYTES: u32 = PackPointer::PACK_BYTES;
+
+    fn pack(&self, offset: u32, packer: &mut BytePacker) {
+        pack_iter(offset, packer, self.iter());
+    }
+}
+
+impl<'b, K: Unpack<'b> + Pack + Ord, V: Unpack<'b> + Pack> Unpack<'b> for BTreeMap<K, V> {
+    fn unpack(offset: u32, unpacker: &ByteUnpacker<'b>) -> Option<Self> {
+        let iter = unpack_iter(offset, unpacker)?;
+
+        iter.collect()
+    }
+}
+
+fn pack_iter<T: Pack>(
+    offset: u32,
+    packer: &mut BytePacker,
+    iter: impl ExactSizeIterator<Item = T>,
+) {
+    let needed_bytes = T::PACK_BYTES as usize * iter.len();
+
+    let ptr = packer.push_dynamic(vec![0; needed_bytes].as_ref());
+    ptr.pack(offset, packer);
+
+    for (i, v) in iter.enumerate() {
+        let offset = ptr.offset + i as u32 * T::PACK_BYTES;
+
+        v.pack(offset, packer);
+    }
+}
+
+// fn pack_iter_ref<'a, T: Pack + 'a>(
+//     offset: u32,
+//     packer: &mut BytePacker,
+//     iter: impl ExactSizeIterator<Item = &'a T>,
+// ) {
+//     let needed_bytes = T::PACK_BYTES as usize * iter.len();
+
+//     let ptr = packer.push_dynamic(vec![0; needed_bytes].as_ref());
+//     ptr.pack(offset, packer);
+
+//     for (i, v) in iter.enumerate() {
+//         let offset = ptr.offset + i as u32 * T::PACK_BYTES;
+
+//         v.pack(offset, packer);
+//     }
+// }
+
+fn unpack_iter<'b, T: Pack + Unpack<'b>>(
+    offset: u32,
+    unpacker: &ByteUnpacker<'b>,
+) -> Option<impl ExactSizeIterator<Item = Option<T>>> {
+    let ptr = PackPointer::unpack(offset, unpacker)?;
+
+    let count = ptr.len / T::PACK_BYTES;
+
+    Some((0..count).map(move |i| {
+        let offset = ptr.offset + i * T::PACK_BYTES;
+
+        T::unpack(offset, unpacker)
+    }))
 }
 
 // ---------- extern types ----------

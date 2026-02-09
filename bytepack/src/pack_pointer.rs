@@ -9,10 +9,22 @@ pub struct PackPointer {
 }
 
 impl PackPointer {
-    pub const NULL: Self = PackPointer {
-        offset: 0,
-        len: 0
-    };
+    pub const NULL: Self = PackPointer { offset: 0, len: 0 };
+
+    pub const fn inline(tag: [u8; 4]) -> Self {
+        Self {
+            offset: 0,
+            len: u32::from_be_bytes(tag),
+        }
+    }
+
+    pub const fn inline_tag(&self) -> Option<[u8; 4]> {
+        if self.offset == 0 {
+            Some(self.len.to_be_bytes())
+        } else {
+            None
+        }
+    }
 }
 
 impl Pack for PackPointer {

@@ -1,11 +1,5 @@
 use chumsky::{
-    Parser,
-    error::Rich,
-    extra,
-    pratt::{infix, left, prefix},
-    prelude::{just, recursive},
-    select,
-    span::SimpleSpan,
+    IterParser, Parser, combinator::To, error::Rich, extra, pratt::{infix, left, prefix}, prelude::{choice, just, recursive}, select, span::SimpleSpan
 };
 use db_core::{
     expr::{BinaryOp, Expr, MathOp, UnaryOp},
@@ -16,12 +10,9 @@ use db_core::query::Query;
 
 use crate::token::{Keyword, Op, Separator, Token};
 
-pub fn parser<'token, 'src: 'token>() -> impl Parser<
-    'token,
-    &'token [Token<'src>],
-    Query,
-    extra::Err<Rich<'token, Token<'src>, SimpleSpan>>,
-> {
+pub fn parser<'token, 'src: 'token>()
+-> impl Parser<'token, &'token [Token<'src>], Query, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
+{
     let ident = select! {
         Token::Ident(ident) => ident
     };
@@ -43,6 +34,18 @@ pub fn parse_expr<'token, 'src: 'token>()
 -> impl Parser<'token, &'token [Token<'src>], Expr, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
 + Clone {
     recursive(|expr| {
+        let fn_call = select! { Token::Ident(ident) => ident }.then(
+            expr.clone()
+                .separated_by(just(Token::Separator(Separator::Comma)))
+                .collect()
+                .delimited_by(
+                    just(Token::Separator(Separator::ParenOpen)),
+                    just(Token::Separator(Separator::ParenClose)),
+                ),
+        ).map(|(name, args)| {
+            Expr::FnCall { name: name.into(), args }
+        });
+
         let num = select! {
             Token::Number(num) => num,
         }
@@ -65,9 +68,15 @@ pub fn parse_expr<'token, 'src: 'token>()
 
         let literal = num.or(boolean).map(Expr::Literal).or(table_ident);
 
-        let atom = literal.or(expr.delimited_by(
+        let paren_expr = expr.delimited_by(
             just(Token::Separator(Separator::ParenOpen)),
             just(Token::Separator(Separator::ParenClose)),
+        );
+
+        let atom = choice((
+            fn_call,
+            literal,
+            paren_expr
         ));
 
         let field_access = atom.foldl(

@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
+use db_core::ty::FieldTy;
 use ulid::Ulid;
-
-use crate::FieldType;
 
 #[derive(thiserror::Error, Debug)]
 pub enum DbError {
@@ -11,7 +10,7 @@ pub enum DbError {
     #[error("Record {table}:{record} does not exist")]
     RecordDoesNotExist { table: Arc<str>, record: Ulid },
     #[error("Expected type '{expected:?}'")]
-    WrongType { expected: FieldType },
+    WrongType { expected: FieldTy },
     #[error("Table {table} does not exist")]
     TableDoesNotExist { table: Arc<str> },
 }

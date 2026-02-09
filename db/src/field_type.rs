@@ -1,9 +1,12 @@
 use std::{fmt::Display, sync::Arc};
 
 use chrono::DateTime;
+use db_core::inline_pointer::{InlinePointerPack, InlinePointerUnpack};
 use ulid::Ulid;
 
-use bytepack::{Pack, PackPointer, Unpack};
+use bytepack::{Pack, Unpack};
+
+type InlinePointerFieldType<'a> = InlinePointerPack<'a, FieldType>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldType {
@@ -30,7 +33,7 @@ pub enum NumberFieldType {
 }
 
 impl Pack for FieldType {
-    const PACK_BYTES: u32 = MaybeInlinePointerValue::PACK_BYTES;
+    const PACK_BYTES: u32 = InlinePointerFieldType::PACK_BYTES;
 
     fn pack(&self, offset: u32, packer: &mut bytepack::BytePacker) {
         self.pointer_value().pack(offset, packer);
@@ -39,9 +42,9 @@ impl Pack for FieldType {
 
 impl<'b> Unpack<'b> for FieldType {
     fn unpack(offset: u32, unpacker: &bytepack::ByteUnpacker<'b>) -> Option<Self> {
-        let pointer_value = MaybeInlinePointerValueUnpack::unpack(offset, unpacker)?;
+        let pointer_value = InlinePointerUnpack::unpack(offset, unpacker)?;
         match pointer_value {
-            MaybeInlinePointerValueUnpack::Inline { tag } => match &tag {
+            InlinePointerUnpack::Inline { tag } => match &tag {
                 b"text" => Some(Self::Text),
                 b"dati" => Some(Self::DateTime),
                 b"u8  " => Some(Self::Number(NumberFieldType::U8)),
@@ -56,7 +59,7 @@ impl<'b> Unpack<'b> for FieldType {
                 b"i128" => Some(Self::Number(NumberFieldType::I128)),
                 _ => None,
             },
-            MaybeInlinePointerValueUnpack::Indirect {
+            InlinePointerUnpack::Indirect {
                 tag,
                 value,
                 value_offset,
@@ -86,126 +89,52 @@ impl<'b> Unpack<'b> for FieldType {
     }
 }
 
-enum MaybeInlinePointerValue<'a> {
-    Inline { tag: [u8; 4] },
-    Indirect { tag: [u8; 4], value: &'a [u8] },
-    Nested { tag: [u8; 4], value: &'a FieldType },
-}
-
-impl<'a> Pack for MaybeInlinePointerValue<'a> {
-    const PACK_BYTES: u32 = PackPointer::PACK_BYTES;
-
-    fn pack(&self, offset: u32, packer: &mut bytepack::BytePacker) {
-        let pointer = match self {
-            MaybeInlinePointerValue::Inline { tag } => PackPointer {
-                offset: 0,
-                len: u32::from_be_bytes(*tag),
-            },
-            MaybeInlinePointerValue::Indirect { tag, value } => {
-                let tag_pointer = packer.push_dynamic(tag);
-                let value_pointer = packer.push_dynamic(value);
-
-                PackPointer {
-                    offset: tag_pointer.offset,
-                    len: tag_pointer.len + value_pointer.len,
-                }
-            }
-            MaybeInlinePointerValue::Nested { tag, value } => {
-                let tag_pointer = packer.push_dynamic(tag);
-                let value_pointer = packer.push_dynamic(&[0; FieldType::PACK_BYTES as usize]);
-
-                value.pack(value_pointer.offset, packer);
-
-                PackPointer {
-                    offset: tag_pointer.offset,
-                    len: tag_pointer.len + value_pointer.len,
-                }
-            }
-        };
-
-        pointer.pack(offset, packer);
-    }
-}
-
-enum MaybeInlinePointerValueUnpack<'a> {
-    Inline {
-        tag: [u8; 4],
-    },
-    Indirect {
-        tag: [u8; 4],
-        value: &'a [u8],
-        value_offset: u32,
-    },
-}
-
-impl<'b> Unpack<'b> for MaybeInlinePointerValueUnpack<'b> {
-    fn unpack(offset: u32, unpacker: &bytepack::ByteUnpacker<'b>) -> Option<Self> {
-        let pointer = PackPointer::unpack(offset, unpacker)?;
-
-        if pointer.offset == 0 {
-            let tag = pointer.len.to_be_bytes();
-            Some(Self::Inline { tag })
-        } else {
-            let value = unpacker.read_bytes(pointer);
-
-            let tag = value[0..4].try_into().ok()?;
-            let value = &value[4..];
-
-            Some(Self::Indirect {
-                tag,
-                value,
-                value_offset: pointer.offset + 4,
-            })
-        }
-    }
-}
-
 impl FieldType {
-    fn pointer_value(&self) -> MaybeInlinePointerValue<'_> {
+    fn pointer_value(&self) -> InlinePointerFieldType<'_> {
         match self {
-            FieldType::Record { table_name } => MaybeInlinePointerValue::Indirect {
+            FieldType::Record { table_name } => InlinePointerFieldType::Indirect {
                 tag: *b"rcrd",
                 value: table_name.as_bytes(),
             },
-            FieldType::List { ty } => MaybeInlinePointerValue::Nested {
+            FieldType::List { ty } => InlinePointerFieldType::Nested {
                 tag: *b"list",
                 value: ty,
             },
-            FieldType::Option { ty } => MaybeInlinePointerValue::Nested {
+            FieldType::Option { ty } => InlinePointerFieldType::Nested {
                 tag: *b"opti",
                 value: ty,
             },
-            FieldType::Text => MaybeInlinePointerValue::Inline { tag: *b"text" },
-            FieldType::DateTime => MaybeInlinePointerValue::Inline { tag: *b"dati" },
+            FieldType::Text => InlinePointerFieldType::Inline { tag: *b"text" },
+            FieldType::DateTime => InlinePointerFieldType::Inline { tag: *b"dati" },
             FieldType::Number(NumberFieldType::U8) => {
-                MaybeInlinePointerValue::Inline { tag: *b"u8  " }
+                InlinePointerFieldType::Inline { tag: *b"u8  " }
             }
             FieldType::Number(NumberFieldType::U16) => {
-                MaybeInlinePointerValue::Inline { tag: *b"u16 " }
+                InlinePointerFieldType::Inline { tag: *b"u16 " }
             }
             FieldType::Number(NumberFieldType::U32) => {
-                MaybeInlinePointerValue::Inline { tag: *b"u32 " }
+                InlinePointerFieldType::Inline { tag: *b"u32 " }
             }
             FieldType::Number(NumberFieldType::U64) => {
-                MaybeInlinePointerValue::Inline { tag: *b"u64 " }
+                InlinePointerFieldType::Inline { tag: *b"u64 " }
             }
             FieldType::Number(NumberFieldType::U128) => {
-                MaybeInlinePointerValue::Inline { tag: *b"u128" }
+                InlinePointerFieldType::Inline { tag: *b"u128" }
             }
             FieldType::Number(NumberFieldType::I8) => {
-                MaybeInlinePointerValue::Inline { tag: *b"i8  " }
+                InlinePointerFieldType::Inline { tag: *b"i8  " }
             }
             FieldType::Number(NumberFieldType::I16) => {
-                MaybeInlinePointerValue::Inline { tag: *b"i16 " }
+                InlinePointerFieldType::Inline { tag: *b"i16 " }
             }
             FieldType::Number(NumberFieldType::I32) => {
-                MaybeInlinePointerValue::Inline { tag: *b"i32 " }
+                InlinePointerFieldType::Inline { tag: *b"i32 " }
             }
             FieldType::Number(NumberFieldType::I64) => {
-                MaybeInlinePointerValue::Inline { tag: *b"i64 " }
+                InlinePointerFieldType::Inline { tag: *b"i64 " }
             }
             FieldType::Number(NumberFieldType::I128) => {
-                MaybeInlinePointerValue::Inline { tag: *b"i128" }
+                InlinePointerFieldType::Inline { tag: *b"i128" }
             }
         }
     }
@@ -257,8 +186,8 @@ impl Display for FieldType {
 mod tests {
 
     use bytepack::{BytePacker, ByteUnpacker, PackFormat, PackerFormat};
+    use db_core::defs::table::TableFieldDef;
 
-    use crate::table::TableField;
 
     use super::*;
 
@@ -280,7 +209,7 @@ mod tests {
         ];
 
         let format = PackerFormat::new(
-            [TableField::new(
+            [TableFieldDef::new(
                 "fields",
                 FieldType::List {
                     ty: Box::new(

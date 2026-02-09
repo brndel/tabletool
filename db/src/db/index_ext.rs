@@ -1,35 +1,19 @@
-use std::sync::Arc;
 
-use bytepack::{ByteUnpacker, PackFormat, Unpack};
+use bytepack::PackFormat;
 use chrono::{DateTime, Utc};
-use db_core::record::RecordBytes;
+use db_core::{
+    defs::index::IndexOnDelete,
+    record::RecordBytes,
+    ty::FieldTy,
+};
 use redb::{MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, WriteTransaction};
 use ulid::Ulid;
 
 use crate::{
-    Db, FieldType, FieldValue,
-    db::{
-        TableWithIdDef,
-        table_ext::DbTables,
-        trigger_ext::{DbTrigger, TriggerAction},
-    },
+    Db, FieldValue,
+    db::TableWithIdDef,
     error::DbError,
 };
-
-#[derive(Debug, Clone)]
-pub struct IndexDef {
-    name: Arc<str>,
-    table: Arc<str>,
-    field: Arc<str>,
-    on_delete: IndexOnDelete,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum IndexOnDelete {
-    None,
-    Cascase,
-    SetNone,
-}
 
 impl Db {
     pub fn index_insert(
@@ -38,26 +22,25 @@ impl Db {
         index_name: &str,
         record: &RecordBytes,
     ) -> Result<(), DbError> {
-        let (field_ptr, field_ty) = {
+        let field = {
             let guard = self.inner.tables.read().unwrap();
 
             let index = guard.indices.get(index_name).unwrap();
 
-            let table = guard.tables.get(&index.table).unwrap();
-            let format = table.packer_format();
-            let table_field = table.field(&index.field).unwrap();
-            let packer_field = format.field(&index.field).unwrap();
+            let field = guard
+                .table_field(&index.table_name, &index.field_name)
+                .unwrap();
 
-            (packer_field.pointer, table_field.ty.clone())
+            field.clone()
         };
 
-        match field_ty {
-            FieldType::Record { table_name } => {
+        match field.ty {
+            FieldTy::RecordId { table_name } => {
                 let mut index = tx.open_multimap_table(
                     MultimapTableDefinition::<'_, u128, u128>::new(index_name),
                 )?;
 
-                let field_value = record.unpack::<Ulid>(field_ptr.offset).unwrap();
+                let field_value = record.unpack::<Ulid>(field.offset).unwrap();
 
                 if !self.record_exists(
                     tx.open_table(TableWithIdDef::new(&table_name))?,
@@ -71,8 +54,8 @@ impl Db {
 
                 index.insert(field_value.0, record.id().0)?;
             }
-            FieldType::DateTime => {
-                let field_value = record.unpack::<DateTime<Utc>>(field_ptr.offset).unwrap();
+            FieldTy::Timestamp => {
+                let field_value = record.unpack::<DateTime<Utc>>(field.offset).unwrap();
 
                 let mut index = tx.open_multimap_table(
                     MultimapTableDefinition::<'_, i64, u128>::new(index_name),
@@ -92,21 +75,21 @@ impl Db {
         index_name: &str,
         record: &RecordBytes,
     ) -> Result<(), DbError> {
-        let (table_field_ty, field_ptr) = {
+        let field = {
             let guard = self.inner.tables.read().unwrap();
 
             let index = guard.indices.get(index_name).unwrap();
 
-            let table = guard.tables.get(&index.table).unwrap();
-            let table_field = table.field(&index.field).unwrap();
-            let packer_field = table.packer_format().field(&index.field).unwrap().pointer;
+            let field = guard
+                .table_field(&index.table_name, &index.field_name)
+                .unwrap();
 
-            (table_field.ty.clone(), packer_field)
+            field.clone()
         };
 
-        match &table_field_ty {
-            FieldType::Record { .. } => {
-                let value = record.unpack::<Ulid>(field_ptr.offset).unwrap();
+        match &field.ty {
+            FieldTy::RecordId { .. } => {
+                let value = record.unpack::<Ulid>(field.offset).unwrap();
 
                 let mut index_table =
                     tx.open_multimap_table(MultimapTableDefinition::<'_, u128, u128>::new(
@@ -117,8 +100,8 @@ impl Db {
 
                 drop(index_table);
             }
-            FieldType::DateTime => {
-                let field_value = record.unpack::<DateTime<Utc>>(field_ptr.offset).unwrap();
+            FieldTy::Timestamp => {
+                let field_value = record.unpack::<DateTime<Utc>>(field.offset).unwrap();
 
                 let mut index = tx.open_multimap_table(
                     MultimapTableDefinition::<'_, i64, u128>::new(index_name),
@@ -143,14 +126,14 @@ impl Db {
 
             let index = guard.indices.get(index_name).unwrap();
 
-            let table = guard.tables.get(&index.table).unwrap();
-            let table_field = table.field(&index.field).unwrap();
+            let table = guard.tables.get(&index.table_name).unwrap();
+            let table_field = table.field(&index.field_name).unwrap();
 
             (table_field.ty.clone(), index.clone())
         };
 
         match &table_field_ty {
-            FieldType::Record { .. } => {
+            FieldTy::RecordId { .. } => {
                 let on_delete = &index.on_delete;
 
                 let mut index_table =
@@ -163,7 +146,8 @@ impl Db {
                 match on_delete {
                     IndexOnDelete::Cascase => {
                         for id in index_table.remove_all(&id.0)? {
-                            let mut table = tx.open_table(TableWithIdDef::new(&index.table))?;
+                            let mut table =
+                                tx.open_table(TableWithIdDef::new(&index.table_name))?;
                             let id = id?.value();
                             let value = table.remove(id)?.unwrap();
 
@@ -184,7 +168,7 @@ impl Db {
                 drop(index_table);
 
                 for record in delete_emit {
-                    self.emit_delete(&index.table, &record, tx)?;
+                    self.emit_delete(&index.table_name, &record, tx)?;
                 }
             }
             _ => todo!(),
@@ -208,14 +192,14 @@ impl Db {
 
             let index = guard.indices.get(index_name).unwrap();
 
-            let table = guard.tables.get(&index.table).unwrap();
-            let table_field = table.field(&index.field).unwrap();
+            let table = guard.tables.get(&index.table_name).unwrap();
+            let table_field = table.field(&index.field_name).unwrap();
 
             (table_field.ty.clone(), index.clone())
         };
 
         match table_field_ty {
-            FieldType::Record { .. } => {
+            FieldTy::RecordId { .. } => {
                 let index_table =
                     tx.open_multimap_table(MultimapTableDefinition::<'_, u128, u128>::new(
                         index_name,
@@ -239,7 +223,7 @@ impl Db {
 
                 Ok(result)
             }
-            FieldType::DateTime => {
+            FieldTy::Timestamp => {
                 let index_table = tx.open_multimap_table(
                     MultimapTableDefinition::<'_, i64, u128>::new(index_name),
                 )?;
@@ -248,7 +232,7 @@ impl Db {
                     Some(FieldValue::DateTime(value)) => Some(value),
                     Some(_) => {
                         return Err(DbError::WrongType {
-                            expected: FieldType::DateTime,
+                            expected: FieldTy::Timestamp,
                         });
                     }
                     None => None,
@@ -258,19 +242,19 @@ impl Db {
                     Some(FieldValue::DateTime(value)) => Some(value),
                     Some(_) => {
                         return Err(DbError::WrongType {
-                            expected: FieldType::DateTime,
+                            expected: FieldTy::Timestamp,
                         });
                     }
                     None => None,
                 };
 
                 let iter = match (min_value, max_value) {
-                    (None, None) => {
-                        index_table.iter()?
-                    }
+                    (None, None) => index_table.iter()?,
                     (None, Some(max)) => index_table.range(..max.timestamp())?,
                     (Some(min), None) => index_table.range(min.timestamp()..)?,
-                    (Some(min), Some(max)) => index_table.range(min.timestamp()..max.timestamp())?,
+                    (Some(min), Some(max)) => {
+                        index_table.range(min.timestamp()..max.timestamp())?
+                    }
                 };
 
                 let mut result = Vec::new();
@@ -293,56 +277,5 @@ impl Db {
             }
             _ => todo!(),
         }
-    }
-}
-
-impl IndexDef {
-    pub fn new(
-        index_name: Arc<str>,
-        table: Arc<str>,
-        field: Arc<str>,
-        on_delete: IndexOnDelete,
-    ) -> Self {
-        Self {
-            name: index_name,
-            table,
-            field,
-            on_delete,
-        }
-    }
-
-    pub fn name(&self) -> &Arc<str> {
-        &self.name
-    }
-
-    pub fn triggers(&self, db: &DbTables) -> Vec<(Arc<str>, DbTrigger)> {
-        let mut result = vec![
-            (
-                self.table.clone(),
-                DbTrigger::OnInsert(TriggerAction::InsertIntoIndex {
-                    index_name: self.name.clone(),
-                }),
-            ),
-            (
-                self.table.clone(),
-                DbTrigger::OnDelete(TriggerAction::DeleteValueFromIndex {
-                    index_name: self.name.clone(),
-                }),
-            ),
-        ];
-
-        let source_table = db.table(&self.table).unwrap();
-        let field_ty = &source_table.field(&self.field).unwrap().ty;
-
-        if let FieldType::Record { table_name } = &field_ty {
-            result.push((
-                table_name.clone(),
-                DbTrigger::OnDelete(TriggerAction::DeleteKeyFromIndex {
-                    index_name: self.name.clone(),
-                }),
-            ));
-        }
-
-        result
     }
 }

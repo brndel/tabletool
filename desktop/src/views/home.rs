@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use db::{Db, NamedTable, Table, TableField};
+use db::Db;
+use db_core::{
+    defs::table::{TableDef, TableFieldDef},
+    named::Named,
+    ty::FieldTy,
+};
 use dioxus::prelude::*;
 use ui::{
     button::Button,
@@ -36,53 +41,63 @@ pub fn Home() -> Element {
         let db = db.clone();
         move || {
             let name_field = Arc::<str>::from("name");
+            let project_group_name = Arc::<str>::from("project_group");
+            let project_name = Arc::<str>::from("project");
 
-            db.register_table(NamedTable::new(
-                "project_group",
-                Table::new(
-                    vec![TableField::new(name_field.clone(), db::FieldType::Text, false)],
-                    Some(name_field.clone()),
-                )
-                .unwrap(),
-            ));
+            db.register_table(Named {
+                name: project_group_name.clone(),
+                value: TableDef {
+                    fields: [(name_field.clone(), TableFieldDef { ty: FieldTy::Text })].into(),
+                },
+            });
 
-            db.register_table(NamedTable::new(
-                "project",
-                Table::new(
-                    vec![
-                        TableField::new(name_field.clone(), db::FieldType::Text, false),
-                        TableField::new(
-                            "group",
-                            db::FieldType::Record {
-                                table_name: "project_group".into(),
+            db.register_table(Named {
+                name: project_name.clone(),
+                value: TableDef {
+                    fields: [
+                        (name_field.clone(), TableFieldDef { ty: FieldTy::Text }),
+                        (
+                            "group".into(),
+                            TableFieldDef {
+                                ty: FieldTy::RecordId {
+                                    table_name: project_group_name,
+                                },
                             },
-                            false,
                         ),
-                    ],
-                    Some(name_field),
-                )
-                .unwrap(),
-            ));
+                    ]
+                    .into(),
+                },
+            });
 
-            db.register_table(NamedTable::new(
-                "work_time",
-                Table::new(
-                    vec![
-                        TableField::new(
-                            "project",
-                            db::FieldType::Record {
-                                table_name: "project".into(),
+            db.register_table(Named {
+                name: "work_time".into(),
+                value: TableDef {
+                    fields: [
+                        (
+                            "project".into(),
+                            TableFieldDef {
+                                ty: FieldTy::RecordId {
+                                    table_name: project_name,
+                                },
                             },
-                            false,
                         ),
-                        TableField::new("start_time", db::FieldType::DateTime, true),
-                        TableField::new("end_time", db::FieldType::DateTime, true),
-                        TableField::new("notes", db::FieldType::Text, false),
-                    ],
-                    None,
-                )
-                .unwrap(),
-            ));
+                        (
+                            "start_time".into(),
+                            TableFieldDef {
+                                ty: FieldTy::Timestamp,
+                            },
+                        ),
+                        (
+                            "end_time".into(),
+                            TableFieldDef {
+                                ty: FieldTy::Timestamp,
+                            },
+                        ),
+                        ("notes".into(), TableFieldDef { ty: FieldTy::Text }),
+                    ]
+                    .into(),
+                },
+            });
 
             reload_idx.with_mut(|x| *x += 1)
         }

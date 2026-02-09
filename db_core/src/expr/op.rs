@@ -46,8 +46,8 @@ impl BinaryOp {
     pub fn ty(&self, a: &FieldTy, b: &FieldTy) -> Option<FieldTy> {
         match self {
             BinaryOp::Math(_) => {
-                if a == &FieldTy::Int && b == &FieldTy::Int {
-                    Some(FieldTy::Int)
+                if a == &FieldTy::IntI32 && b == &FieldTy::IntI32 {
+                    Some(FieldTy::IntI32)
                 } else {
                     None
                 }
@@ -60,7 +60,7 @@ impl BinaryOp {
                 }
             }
             BinaryOp::Compare(_) => {
-                if a == &FieldTy::Int && b == &FieldTy::Int {
+                if a == &FieldTy::IntI32 && b == &FieldTy::IntI32 || a == &FieldTy::Timestamp && b == &FieldTy::Timestamp {
                     Some(FieldTy::Bool)
                 } else {
                     None
@@ -107,11 +107,26 @@ impl BinaryOp {
                 };
                 Some(Value::Bool(result))
             }
+            (BinaryOp::Compare(compare_op), Value::DateTime(a), Value::DateTime(b)) => {
+                let result = match compare_op {
+                    CompareOp::Less => a < b,
+                    CompareOp::LessEq => a <= b,
+                    CompareOp::Greater => a > b,
+                    CompareOp::GreaterEq => a >= b,
+                };
+                Some(Value::Bool(result))
+            }
             (BinaryOp::Compare(_), _, _) => None,
             (BinaryOp::Eq(eq_op), Value::Int(a), Value::Int(b)) => {
                 Some(Value::Bool(eq_op.eval(&a, &b)))
             }
             (BinaryOp::Eq(eq_op), Value::Bool(a), Value::Bool(b)) => {
+                Some(Value::Bool(eq_op.eval(&a, &b)))
+            }
+            (BinaryOp::Eq(eq_op), Value::DateTime(a), Value::DateTime(b)) => {
+                Some(Value::Bool(eq_op.eval(&a, &b)))
+            }
+            (BinaryOp::Eq(eq_op), Value::Text(a), Value::Text(b)) => {
                 Some(Value::Bool(eq_op.eval(&a, &b)))
             }
             (BinaryOp::Eq(_), _, _) => None,
@@ -132,8 +147,8 @@ impl UnaryOp {
     pub fn ty(&self, value: &FieldTy) -> Option<FieldTy> {
         match self {
             UnaryOp::Negate => {
-                if value == &FieldTy::Int {
-                    Some(FieldTy::Int)
+                if value == &FieldTy::IntI32 {
+                    Some(FieldTy::IntI32)
                 } else {
                     None
                 }

@@ -1,31 +1,10 @@
-use std::sync::Arc;
-
-use db_core::record::RecordBytes;
+use db_core::{
+    defs::trigger::{DbTrigger, TriggerAction},
+    record::RecordBytes,
+};
 use redb::WriteTransaction;
 
 use crate::{Db, error::DbError};
-
-#[derive(Debug, Clone)]
-pub enum DbTrigger {
-    OnInsert(TriggerAction),
-    OnDelete(TriggerAction),
-}
-
-#[derive(Debug, Clone)]
-pub enum TriggerAction {
-    Println {
-        text: String,
-    },
-    InsertIntoIndex {
-        index_name: Arc<str>,
-    },
-    DeleteValueFromIndex {
-        index_name: Arc<str>,
-    },
-    DeleteKeyFromIndex {
-        index_name: Arc<str>,
-    },
-}
 
 impl Db {
     pub(super) fn emit_insert(

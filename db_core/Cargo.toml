@@ -7,3 +7,4 @@ edition = "2024"
 thiserror.workspace = true
 bytepack.workspace = true
 ulid.workspace = true
+chrono.workspace = true

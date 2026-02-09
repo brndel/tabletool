@@ -1,13 +1,17 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use bytepack::{BytePacker, ByteUnpacker, Unpack};
+use db_core::{
+    defs::{
+        index::IndexDef,
+        table::{TableData, TableDef, TableFieldData},
+        trigger::DbTrigger,
+    },
+    named::Named,
+};
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 
-use crate::{
-    Db, Table,
-    db::{DbTrigger, IndexDef, TableWithIdDef},
-    table::NamedTable,
-};
+use crate::{Db, db::TableWithIdDef};
 
 const TABLE_DEF_TABLE: TableDefinition<'static, &str, &[u8]> = TableDefinition::new("$table");
 
@@ -33,20 +37,26 @@ impl Db {
                     let bytes = table_fields.value();
                     let unpacker = ByteUnpacker::new(bytes);
 
-                    Table::unpack(0, &unpacker).unwrap().clone()
+                    TableDef::unpack(0, &unpacker).unwrap().clone()
                 };
 
-                table_list.push(NamedTable::new(name, value));
+                table_list.push(Named {
+                    name: name.into(),
+                    value,
+                });
             }
         }
 
         table_map.register_tables(table_list);
     }
 
-    pub fn register_table(&self, table: NamedTable) {
+    pub fn register_table(&self, table: Named<TableDef>) {
         let mut tables = self.inner.tables.write().unwrap();
 
-        if tables.tables.contains_key(table.name()) {
+        let name = &table.name;
+        let table_def = &table.value;
+
+        if tables.tables.contains_key(name.as_ref()) {
             panic!("Table already exists");
         }
 
@@ -55,23 +65,23 @@ impl Db {
         {
             let mut tables: redb::Table<'_, &str, &[u8]> = tx.open_table(TABLE_DEF_TABLE).unwrap();
 
-            let current_table = tables.get(table.name()).unwrap();
+            let current_table = tables.get(name.as_ref()).unwrap();
 
             if let Some(current_table) = current_table {
                 let unpacker = ByteUnpacker::new(current_table.value());
 
-                let current_table = Table::unpack(0, &unpacker).unwrap();
+                let current_table = TableDef::unpack(0, &unpacker).unwrap();
 
-                if &current_table == &table.table {
+                if &current_table == table_def {
                     panic!("missmatched table definitions");
                 }
             } else {
                 drop(current_table);
 
-                let bytes = BytePacker::pack_value(&table.table);
+                let bytes = BytePacker::pack_value(&table_def);
 
-                tables.insert(table.name(), &*bytes).unwrap();
-                tx.open_table(TableWithIdDef::new(table.name())).unwrap();
+                tables.insert(name.as_ref(), &*bytes).unwrap();
+                tx.open_table(TableWithIdDef::new(name.as_ref())).unwrap();
             }
         }
 
@@ -111,43 +121,57 @@ impl Db {
         names
     }
 
-    pub fn table(&self, name: &str) -> Option<Table> {
+    pub fn table(&self, name: &str) -> Option<TableData> {
         let tables = self.inner.tables.read().unwrap();
 
-        let fields = tables.table(name).cloned();
-
-        fields
+        tables.table(name).cloned()
     }
 }
 
 #[derive(Default)]
 pub struct DbTables {
-    pub tables: BTreeMap<Arc<str>, Table>,
+    pub tables: BTreeMap<Arc<str>, TableData>,
     pub indices: BTreeMap<Arc<str>, IndexDef>,
     pub triggers: BTreeMap<Arc<str>, Vec<DbTrigger>>,
 }
 
 impl DbTables {
-    pub fn register_tables(&mut self, tables: impl IntoIterator<Item = NamedTable>) {
+    pub fn register_tables(&mut self, tables: impl IntoIterator<Item = Named<TableDef>>) {
         println!("registering tables");
         let mut indices = Vec::new();
 
         for table in tables {
-            
-            let mut ind = table.indices();
-            println!("registering table {} with {} indices", table.name, ind.len());
+            let Named { name, value: table } = table;
+            let table = TableData::from(table);
+
+            let mut ind = table.indices(&name);
+            println!("registering table {} with {} indices", name, ind.len());
             indices.append(&mut ind);
-            
-            self.tables.insert(table.name.clone(), table.table);
+
+            self.tables.insert(name, table);
         }
 
         let mut triggers = Vec::new();
 
         for index in indices {
-            let mut trig = index.triggers(&self);
-            println!("registering index {} with {} triggers", index.name(), trig.len());
-            triggers.append(&mut trig);
-            self.indices.insert(index.name().clone(), index);
+            let Some(target_field) = self.table_field(&index.table_name, &index.field_name) else {
+                println!(
+                    "could not get field {} of table {} for index {}",
+                    index.field_name, index.table_name, index.index_name
+                );
+                continue;
+            };
+
+            let mut index_triggers = index.triggers(&target_field.ty);
+
+            println!(
+                "registering index {} with {} triggers",
+                index.index_name,
+                index_triggers.len()
+            );
+
+            triggers.append(&mut index_triggers);
+            self.indices.insert(index.index_name.clone(), index);
         }
 
         for (table_name, trigger) in triggers {
@@ -175,14 +199,23 @@ impl DbTables {
         let mut indices = Vec::new();
 
         for (name, table) in &self.tables {
-            indices.append(&mut NamedTable::new(name.clone(), table.clone()).indices());
+            let mut table_indices = table.indices(name);
+            indices.append(&mut table_indices);
         }
 
         let mut triggers = Vec::new();
 
         for index in indices {
-            triggers.append(&mut index.triggers(&self));
-            self.indices.insert(index.name().clone(), index);
+            let Some(target_field) = self.table_field(&index.table_name, &index.field_name) else {
+                println!(
+                    "could not get field {} of table {} for index {}",
+                    index.field_name, index.table_name, index.index_name
+                );
+                continue;
+            };
+
+            triggers.append(&mut index.triggers(&target_field.ty));
+            self.indices.insert(index.index_name.clone(), index);
         }
 
         for (table_name, trigger) in triggers {
@@ -190,8 +223,16 @@ impl DbTables {
         }
     }
 
-    pub fn table(&self, name: &str) -> Option<&Table> {
+    pub fn table<'a>(&'a self, name: &str) -> Option<&'a TableData> {
         self.tables.get(name)
+    }
+
+    pub fn table_field<'a>(
+        &'a self,
+        table_name: &str,
+        field_name: &str,
+    ) -> Option<&'a TableFieldData> {
+        self.tables.get(table_name)?.fields.get(field_name)
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &Arc<str>> {

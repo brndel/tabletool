@@ -7,7 +7,7 @@ use crate::{
         ty_ctx::TyCtx,
     },
     named::Named,
-    ty::Ty,
+    ty::{FieldTy, Ty},
     value::Value,
 };
 
@@ -29,6 +29,10 @@ pub enum Expr {
     },
     TableAccess {
         name: Arc<str>,
+    },
+    FnCall {
+        name: Arc<str>,
+        args: Vec<Self>,
     },
 }
 
@@ -59,7 +63,7 @@ impl Expr {
                 if let Ty::Table(table) = value {
                     let field = table.value.fields.get(field.as_ref())?;
 
-                    Some(Ty::Field(field.ty))
+                    Some(Ty::Field(field.ty.clone()))
                 } else {
                     None
                 }
@@ -72,6 +76,10 @@ impl Expr {
                     value: table.clone(),
                 }))
             }
+            Expr::FnCall { name, args } => match name.as_ref() {
+                "now" if args.is_empty() => Some(Ty::Field(FieldTy::Timestamp)),
+                _ => None,
+            },
         }
     }
 
@@ -113,6 +121,10 @@ impl Expr {
                     record: record.clone(),
                 })
             }
+            Expr::FnCall { name, args } => match name.as_ref() {
+                "now" if args.is_empty() => Some(Value::DateTime(ctx.now)),
+                _ => None,
+            },
         }
     }
 }

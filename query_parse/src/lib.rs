@@ -65,7 +65,7 @@ mod tests {
         assert_eq!(query, value);
 
         let ty_ctx = TyCtx { tables: Default::default() };
-        let eval_ctx = EvalCtx { tables: Default::default(), records: Default::default() };
+        let eval_ctx = EvalCtx::default();
 
         assert_eq!(
             query.filter.as_ref().and_then(|filter| filter.ty(&ty_ctx)),

@@ -604,6 +604,7 @@ name = "db_core"
 version = "0.1.0"
 dependencies = [
  "bytepack",
+ "chrono",
  "thiserror 2.0.17",
  "ulid",
 ]

@@ -30,9 +30,12 @@ impl RecordBytes {
     }
 
     pub fn get_field(&self, field: &TableFieldData) -> Option<Value> {
-        let value = match field.ty {
-            FieldTy::Int => Value::Int(self.unpack(field.offset)?),
+        let value = match &field.ty {
+            FieldTy::IntI32 => Value::Int(self.unpack(field.offset)?),
             FieldTy::Bool => Value::Bool(self.unpack(field.offset)?),
+            FieldTy::Timestamp => Value::DateTime(self.unpack(field.offset)?),
+            FieldTy::Text => Value::Text(self.unpack(field.offset)?),
+            FieldTy::RecordId { table_name } => todo!(),
         };
 
         Some(value)

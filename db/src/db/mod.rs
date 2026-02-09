@@ -5,11 +5,8 @@ mod trigger_ext;
 mod query_ext;
 
 use db_core::record::RecordBytes;
-pub use index_ext::*;
-pub use trigger_ext::*;
 
 use std::{
-    collections::BTreeMap,
     path::Path,
     sync::{Arc, RwLock},
 };
@@ -17,8 +14,8 @@ use std::{
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use ulid::Ulid;
 
-use crate::{Table, db::table_ext::DbTables};
-
+use crate::{db::table_ext::DbTables};
+     
 #[derive(Clone)]
 pub struct Db {
     inner: Arc<DbInner>,
