@@ -8,9 +8,9 @@ use db_core::{
 };
 use dioxus::prelude::*;
 use ui::{
+    TableDialogButton,
     button::Button,
     table_tab_bar::{TableTab, TableTabBar},
-    TableDialogButton,
 };
 
 use crate::Route;
@@ -47,7 +47,15 @@ pub fn Home() -> Element {
             db.register_table(Named {
                 name: project_group_name.clone(),
                 value: TableDef {
-                    fields: [(name_field.clone(), TableFieldDef { ty: FieldTy::Text })].into(),
+                    fields: [Named::new(
+                        name_field.clone(),
+                        TableFieldDef {
+                            ty: FieldTy::Text,
+                            has_index: false,
+                        },
+                    )]
+                    .into(),
+                    main_display_field: Some(0),
                 },
             });
 
@@ -55,17 +63,25 @@ pub fn Home() -> Element {
                 name: project_name.clone(),
                 value: TableDef {
                     fields: [
-                        (name_field.clone(), TableFieldDef { ty: FieldTy::Text }),
-                        (
-                            "group".into(),
+                        Named::new(
+                            name_field.clone(),
+                            TableFieldDef {
+                                ty: FieldTy::Text,
+                                has_index: false,
+                            },
+                        ),
+                        Named::new(
+                            "group",
                             TableFieldDef {
                                 ty: FieldTy::RecordId {
                                     table_name: project_group_name,
                                 },
+                                has_index: false,
                             },
                         ),
                     ]
                     .into(),
+                    main_display_field: Some(0),
                 },
             });
 
@@ -73,29 +89,39 @@ pub fn Home() -> Element {
                 name: "work_time".into(),
                 value: TableDef {
                     fields: [
-                        (
-                            "project".into(),
+                        Named::new(
+                            "project",
                             TableFieldDef {
                                 ty: FieldTy::RecordId {
                                     table_name: project_name,
                                 },
+                                has_index: false,
                             },
                         ),
-                        (
-                            "start_time".into(),
+                        Named::new(
+                            "start_time",
                             TableFieldDef {
                                 ty: FieldTy::Timestamp,
+                                has_index: false,
                             },
                         ),
-                        (
-                            "end_time".into(),
+                        Named::new(
+                            "end_time",
                             TableFieldDef {
                                 ty: FieldTy::Timestamp,
+                                has_index: false,
                             },
                         ),
-                        ("notes".into(), TableFieldDef { ty: FieldTy::Text }),
+                        Named::new(
+                            "notes",
+                            TableFieldDef {
+                                ty: FieldTy::Text,
+                                has_index: false,
+                            },
+                        ),
                     ]
                     .into(),
+                    main_display_field: None,
                 },
             });
 

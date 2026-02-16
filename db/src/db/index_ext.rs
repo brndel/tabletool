@@ -4,13 +4,13 @@ use chrono::{DateTime, Utc};
 use db_core::{
     defs::index::IndexOnDelete,
     record::RecordBytes,
-    ty::FieldTy,
+    ty::FieldTy, value::FieldValue,
 };
 use redb::{MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, WriteTransaction};
 use ulid::Ulid;
 
 use crate::{
-    Db, FieldValue,
+    Db,
     db::TableWithIdDef,
     error::DbError,
 };
@@ -63,7 +63,7 @@ impl Db {
 
                 index.insert(field_value.timestamp(), record.id().0)?;
             }
-            _ => todo!(),
+            _ => todo!("index for ty {:?} not yet implemented", field.ty),
         }
 
         Ok(())
@@ -217,7 +217,10 @@ impl Db {
 
                         let value = Ulid::from(value);
 
-                        result.push((FieldValue::RecordId(key_id), value));
+                        result.push((FieldValue::RecordId {
+                            id: key_id,
+                            table_name: index.table_name.clone(),
+                        }, value));
                     }
                 }
 
@@ -229,7 +232,7 @@ impl Db {
                 )?;
 
                 let min_value = match min_value {
-                    Some(FieldValue::DateTime(value)) => Some(value),
+                    Some(FieldValue::Timestamp(value)) => Some(value),
                     Some(_) => {
                         return Err(DbError::WrongType {
                             expected: FieldTy::Timestamp,
@@ -239,7 +242,7 @@ impl Db {
                 };
 
                 let max_value = match max_value {
-                    Some(FieldValue::DateTime(value)) => Some(value),
+                    Some(FieldValue::Timestamp(value)) => Some(value),
                     Some(_) => {
                         return Err(DbError::WrongType {
                             expected: FieldTy::Timestamp,
@@ -269,7 +272,7 @@ impl Db {
 
                         let value = Ulid::from(value);
 
-                        result.push((FieldValue::DateTime(key), value));
+                        result.push((FieldValue::Timestamp(key), value));
                     }
                 }
 

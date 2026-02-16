@@ -8,6 +8,7 @@ pub enum Token<'src> {
     Ident(&'src str),
     Op(Op),
     Number(&'src str),
+    StringLiteral(&'src str),
     Separator(Separator),
 }
 

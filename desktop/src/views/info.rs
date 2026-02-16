@@ -2,7 +2,7 @@ use chrono::{Datelike, Utc};
 use dioxus::prelude::*;
 use ui::{
     date_time_picker::DateTimePicker,
-    modal_button::{ModalButton, ModalCloseButton, ModalContent, ModalRoot},
+    modal_button::{ModalButton, ModalContent, ModalRoot},
 };
 
 const BLOG_CSS: Asset = asset!("/assets/blog.css");

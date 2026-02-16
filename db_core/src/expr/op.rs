@@ -1,4 +1,7 @@
-use crate::{ty::FieldTy, value::Value};
+use crate::{
+    ty::FieldTy,
+    value::{FieldValue, Value},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
@@ -60,7 +63,9 @@ impl BinaryOp {
                 }
             }
             BinaryOp::Compare(_) => {
-                if a == &FieldTy::IntI32 && b == &FieldTy::IntI32 || a == &FieldTy::Timestamp && b == &FieldTy::Timestamp {
+                if a == &FieldTy::IntI32 && b == &FieldTy::IntI32
+                    || a == &FieldTy::Timestamp && b == &FieldTy::Timestamp
+                {
                     Some(FieldTy::Bool)
                 } else {
                     None
@@ -76,9 +81,13 @@ impl BinaryOp {
         }
     }
 
-    pub fn eval(&self, a: Value, b: Value) -> Option<Value> {
+    pub fn eval(&self, a: Value, b: Value) -> Option<FieldValue> {
+        let (Value::Field(a), Value::Field(b)) = (a, b) else {
+            return None;
+        };
+
         match (self, a, b) {
-            (BinaryOp::Math(math_op), Value::Int(a), Value::Int(b)) => {
+            (BinaryOp::Math(math_op), FieldValue::Int(a), FieldValue::Int(b)) => {
                 let result = match math_op {
                     MathOp::Add => a + b,
                     MathOp::Sub => a - b,
@@ -86,48 +95,48 @@ impl BinaryOp {
                     MathOp::Div => a / b,
                 };
 
-                Some(Value::Int(result))
+                Some(FieldValue::Int(result))
             }
             (BinaryOp::Math(_), _, _) => None,
-            (BinaryOp::Logic(logic_op), Value::Bool(a), Value::Bool(b)) => {
+            (BinaryOp::Logic(logic_op), FieldValue::Bool(a), FieldValue::Bool(b)) => {
                 let result = match logic_op {
                     LogicOp::And => a && b,
                     LogicOp::Or => a || b,
                 };
 
-                Some(Value::Bool(result))
+                Some(FieldValue::Bool(result))
             }
             (BinaryOp::Logic(_), _, _) => None,
-            (BinaryOp::Compare(compare_op), Value::Int(a), Value::Int(b)) => {
+            (BinaryOp::Compare(compare_op), FieldValue::Int(a), FieldValue::Int(b)) => {
                 let result = match compare_op {
                     CompareOp::Less => a < b,
                     CompareOp::LessEq => a <= b,
                     CompareOp::Greater => a > b,
                     CompareOp::GreaterEq => a >= b,
                 };
-                Some(Value::Bool(result))
+                Some(FieldValue::Bool(result))
             }
-            (BinaryOp::Compare(compare_op), Value::DateTime(a), Value::DateTime(b)) => {
+            (BinaryOp::Compare(compare_op), FieldValue::Timestamp(a), FieldValue::Timestamp(b)) => {
                 let result = match compare_op {
                     CompareOp::Less => a < b,
                     CompareOp::LessEq => a <= b,
                     CompareOp::Greater => a > b,
                     CompareOp::GreaterEq => a >= b,
                 };
-                Some(Value::Bool(result))
+                Some(FieldValue::Bool(result))
             }
             (BinaryOp::Compare(_), _, _) => None,
-            (BinaryOp::Eq(eq_op), Value::Int(a), Value::Int(b)) => {
-                Some(Value::Bool(eq_op.eval(&a, &b)))
+            (BinaryOp::Eq(eq_op), FieldValue::Int(a), FieldValue::Int(b)) => {
+                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
-            (BinaryOp::Eq(eq_op), Value::Bool(a), Value::Bool(b)) => {
-                Some(Value::Bool(eq_op.eval(&a, &b)))
+            (BinaryOp::Eq(eq_op), FieldValue::Bool(a), FieldValue::Bool(b)) => {
+                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
-            (BinaryOp::Eq(eq_op), Value::DateTime(a), Value::DateTime(b)) => {
-                Some(Value::Bool(eq_op.eval(&a, &b)))
+            (BinaryOp::Eq(eq_op), FieldValue::Timestamp(a), FieldValue::Timestamp(b)) => {
+                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
-            (BinaryOp::Eq(eq_op), Value::Text(a), Value::Text(b)) => {
-                Some(Value::Bool(eq_op.eval(&a, &b)))
+            (BinaryOp::Eq(eq_op), FieldValue::Text(a), FieldValue::Text(b)) => {
+                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
             (BinaryOp::Eq(_), _, _) => None,
         }
@@ -164,9 +173,13 @@ impl UnaryOp {
     }
 
     pub fn eval(&self, value: Value) -> Option<Value> {
+        let Value::Field(value) = value else {
+            return None;
+        };
+
         match (self, value) {
-            (UnaryOp::Negate, Value::Int(value)) => Some(Value::Int(-value)),
-            (UnaryOp::LogicNot, Value::Bool(value)) => Some(Value::Bool(!value)),
+            (UnaryOp::Negate, FieldValue::Int(value)) => Some(FieldValue::Int(-value).into()),
+            (UnaryOp::LogicNot, FieldValue::Bool(value)) => Some(FieldValue::Bool(!value).into()),
             _ => None,
         }
     }

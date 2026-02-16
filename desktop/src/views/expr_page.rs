@@ -2,12 +2,12 @@ use chrono::Utc;
 use db::{Db, DbError};
 use db_core::{
     defs::table::TableData,
-    expr::{EvalCtx, TyCtx},
+    expr::EvalCtx,
     query::Query,
     record::RecordBytes,
 };
 use dioxus::prelude::*;
-use query_parse::{parse, parse_expr};
+use query_parse::parse_expr;
 use ui::DataTable;
 
 #[component]
@@ -47,7 +47,10 @@ pub fn ExprPage() -> Element {
 
     rsx! {
         textarea {
+            class: "query-input",
             placeholder: "Query/Expr",
+            spellcheck: false,
+            autocomplete: false,
             oninput: move |e| text_value.set(e.value()),
         }
         div {

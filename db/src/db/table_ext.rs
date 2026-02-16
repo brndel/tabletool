@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use bytepack::{BytePacker, ByteUnpacker, Unpack};
+use bytepack::{BytePacker, ByteUnpacker, PackFormat, Unpack};
 use db_core::{
     defs::{
         index::IndexDef,
@@ -232,7 +232,7 @@ impl DbTables {
         table_name: &str,
         field_name: &str,
     ) -> Option<&'a TableFieldData> {
-        self.tables.get(table_name)?.fields.get(field_name)
+        self.tables.get(table_name)?.field(field_name)
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &Arc<str>> {

@@ -5,6 +5,8 @@ use ulid::Ulid;
 
 use crate::{BytePacker, ByteUnpacker, PackPointer};
 
+pub use bytepack_derive::{Pack, Unpack};
+
 pub trait Pack {
     const PACK_BYTES: u32;
     fn pack(&self, offset: u32, packer: &mut BytePacker);
@@ -283,23 +285,6 @@ fn pack_iter<T: Pack>(
     }
 }
 
-// fn pack_iter_ref<'a, T: Pack + 'a>(
-//     offset: u32,
-//     packer: &mut BytePacker,
-//     iter: impl ExactSizeIterator<Item = &'a T>,
-// ) {
-//     let needed_bytes = T::PACK_BYTES as usize * iter.len();
-
-//     let ptr = packer.push_dynamic(vec![0; needed_bytes].as_ref());
-//     ptr.pack(offset, packer);
-
-//     for (i, v) in iter.enumerate() {
-//         let offset = ptr.offset + i as u32 * T::PACK_BYTES;
-
-//         v.pack(offset, packer);
-//     }
-// }
-
 fn unpack_iter<'b, T: Pack + Unpack<'b>>(
     offset: u32,
     unpacker: &ByteUnpacker<'b>,
@@ -379,5 +364,47 @@ impl<'b> Unpack<'b> for chrono::NaiveTime {
         let timestamp = u32::unpack(offset, unpacker)?;
 
         Self::from_num_seconds_from_midnight_opt(timestamp, 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Pack, Unpack, PartialEq, Debug)]
+    struct PackDerive {
+        a: u8,
+        b: Vec<String>,
+    }
+
+    #[derive(Pack, Unpack)]
+    #[allow(unused)]
+    struct GenericDerive<T> {
+        header: u8,
+        value: T
+    }
+
+    #[test]
+    fn test_name() {
+        assert_eq!(
+            PackDerive::PACK_BYTES,
+            u8::PACK_BYTES + Vec::<String>::PACK_BYTES
+        );
+
+        let value = vec![
+            PackDerive {
+                a: 123,
+                b: vec!["hello".to_owned(), "world".to_owned()],
+            },
+            PackDerive {
+                a: 187,
+                b: vec!["foo".to_owned(), "bar".to_owned()],
+            },
+        ];
+
+        let bytes = BytePacker::pack_value(&value);
+        let result = Vec::<PackDerive>::unpack(0, &ByteUnpacker::new(&bytes));
+
+        assert_eq!(Some(value), result);
     }
 }

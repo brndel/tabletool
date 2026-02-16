@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use bytepack::PackFormat;
+
 use crate::{
     expr::{
         EvalCtx,
@@ -8,12 +10,12 @@ use crate::{
     },
     named::Named,
     ty::{FieldTy, Ty},
-    value::Value,
+    value::{FieldValue, Value},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
-    Literal(Value),
+    Literal(FieldValue),
     BinaryOp {
         a: Box<Self>,
         op: BinaryOp,
@@ -39,7 +41,7 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self, ctx: &TyCtx) -> Option<Ty> {
         match self {
-            Expr::Literal(value) => Some(value.ty()),
+            Expr::Literal(value) => Some(Ty::Field(value.ty())),
             Expr::BinaryOp { a, op, b } => {
                 let a = a.ty(ctx)?;
                 let b = b.ty(ctx)?;
@@ -61,7 +63,7 @@ impl Expr {
                 let value = value.ty(ctx)?;
 
                 if let Ty::Table(table) = value {
-                    let field = table.value.fields.get(field.as_ref())?;
+                    let field = table.value.field(field.as_ref())?;
 
                     Some(Ty::Field(field.ty.clone()))
                 } else {
@@ -85,12 +87,12 @@ impl Expr {
 
     pub fn eval(&self, ctx: &EvalCtx) -> Option<Value> {
         match self {
-            Expr::Literal(value) => Some(value.clone()),
+            Expr::Literal(value) => Some(Value::Field(value.clone())),
             Expr::BinaryOp { a, op, b } => {
                 let a = a.eval(ctx)?;
                 let b = b.eval(ctx)?;
 
-                op.eval(a, b)
+                op.eval(a, b).map(Into::into)
             }
             Expr::UnaryOp { op, value } => {
                 let value = value.eval(ctx)?;
@@ -102,9 +104,9 @@ impl Expr {
 
                 match value {
                     Value::Record { table, record } => {
-                        let field = table.value.fields.get(field)?;
+                        let field = table.value.field(field)?;
 
-                        record.get_field(field)
+                        record.get_field(field).map(Into::into)
                     }
                     _ => None,
                 }
@@ -122,7 +124,7 @@ impl Expr {
                 })
             }
             Expr::FnCall { name, args } => match name.as_ref() {
-                "now" if args.is_empty() => Some(Value::DateTime(ctx.now)),
+                "now" if args.is_empty() => Some(FieldValue::Timestamp(ctx.now).into()),
                 _ => None,
             },
         }

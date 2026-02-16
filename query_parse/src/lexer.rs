@@ -4,7 +4,7 @@ use chumsky::{
     IterParser, Parser,
     error::Rich,
     extra,
-    prelude::{choice, just},
+    prelude::{choice, just, none_of},
     select,
     span::SimpleSpan,
     text::{ident, whitespace},
@@ -43,6 +43,15 @@ pub fn lexer<'src>()
         .to_slice()
         .map(|slice| Token::Number(slice));
 
+    let string_escape = just('\\').then(choice([
+        just('\\'),
+        just('"'),
+    ])).ignored();
+
+    let string_content = none_of("\\\"").ignored().or(string_escape).repeated().to_slice().map(Token::StringLiteral);
+
+    let string_literal = string_content.delimited_by(just('"'), just('"'));
+
     let separator = select! {
         '.' => Separator::Dot,
         ',' => Separator::Comma,
@@ -60,7 +69,7 @@ pub fn lexer<'src>()
         }
     });
 
-    let token = ident.or(op).or(num).or(separator);
+    let token = ident.or(op).or(num).or(string_literal).or(separator);
 
     token.padded_by(whitespace()).repeated().collect()
 }

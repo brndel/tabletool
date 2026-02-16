@@ -28,7 +28,7 @@ mod tests {
     use db_core::{
         expr::{BinaryOp, CompareOp, EqOp, EvalCtx, Expr, MathOp, TyCtx},
         ty::{FieldTy, Ty},
-        value::Value,
+        value::{FieldValue, Value},
     };
 
     use super::*;
@@ -41,20 +41,20 @@ mod tests {
 
         let expr = Expr::BinaryOp {
             a: Box::new(Expr::BinaryOp {
-                a: Box::new(Expr::Literal(Value::Int(5))),
+                a: Box::new(Expr::Literal(FieldValue::Int(5))),
                 op: BinaryOp::Compare(CompareOp::Less),
                 b: Box::new(Expr::BinaryOp {
                     a: Box::new(Expr::BinaryOp {
-                        a: Box::new(Expr::Literal(Value::Int(10))),
+                        a: Box::new(Expr::Literal(FieldValue::Int(10))),
                         op: BinaryOp::Math(MathOp::Mul),
-                        b: Box::new(Expr::Literal(Value::Int(4))),
+                        b: Box::new(Expr::Literal(FieldValue::Int(4))),
                     }),
                     op: BinaryOp::Math(MathOp::Add),
-                    b: Box::new(Expr::Literal(Value::Int(2))),
+                    b: Box::new(Expr::Literal(FieldValue::Int(2))),
                 }),
             }),
             op: BinaryOp::Eq(EqOp::Eq),
-            b: Box::new(Expr::Literal(Value::Bool(true))),
+            b: Box::new(Expr::Literal(FieldValue::Bool(true))),
         };
 
         let value = Query {
@@ -73,7 +73,7 @@ mod tests {
         );
         assert_eq!(
             query.filter.as_ref().and_then(|filter| filter.eval(&eval_ctx)),
-            Some(Value::Bool(true))
+            Some(Value::Field(FieldValue::Bool(true)))
         );
     }
 

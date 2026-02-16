@@ -1,9 +1,11 @@
 use std::{str::FromStr, sync::Arc};
 
-use bytepack::{BytePacker, ByteUnpacker, PackFormat};
+use bytepack::{BytePacker, PackFormat};
 use chrono::{DateTime, Timelike, Utc};
-use db::{Db, FieldValue, Ulid};
-use db_core::{defs::table::TableData, record::RecordBytes, ty::FieldTy};
+use db::{Db, Ulid};
+use db_core::{
+    defs::table::TableData, named::Named, record::RecordBytes, ty::FieldTy, value::FieldValue,
+};
 use dioxus::prelude::*;
 
 use crate::{
@@ -15,8 +17,7 @@ use crate::{
     select::{
         Select, SelectGroup, SelectGroupLabel, SelectItemIndicator, SelectList, SelectOption,
         SelectTrigger, SelectValue,
-    },
-    table::unpack_to_string,
+    }, table::extract_value,
 };
 
 #[component]
@@ -35,9 +36,10 @@ pub fn RecordDialogButton(
         println!("setting input_values");
         input_values.set(
             table()
-                .fields
-                .iter()
-                .map(|(field_name, field)| RecordField::new(field_name.clone(), field.ty.clone()))
+                .fields()
+                .map(|Named { name, value: field }| {
+                    RecordField::new(name.clone(), field.ty.clone())
+                })
                 .collect::<Vec<_>>(),
         );
     });
@@ -49,11 +51,12 @@ pub fn RecordDialogButton(
         let table: &TableData = &table;
 
         let mut packer = BytePacker::new(table.fixed_byte_count());
-        let mut fields = packer.fields(table, 0);
 
         for field in values.iter() {
             if let Some(value) = &field.value() {
-                fields.pack(&field.name, value);
+                if let Some(field) = table.field(&field.name) {
+                    value.pack(field.offset, &mut packer);
+                }
             } else {
                 warn!("field {} has no value", field.name);
                 return;
@@ -105,8 +108,6 @@ fn RecordFieldInput(field: Store<RecordField>) -> Element {
         });
     };
 
-    let db = use_context::<Db>();
-
     field.value().with(|value| {
         match value {
             RecordFieldValue::Timestamp(date) => {
@@ -131,33 +132,25 @@ fn RecordFieldInput(field: Store<RecordField>) -> Element {
                 Input { class: if string_field.value.is_err() {"input invalid"} else {"input"}, key: "{name()}-input", id: "{name()}", placeholder: "{name()}", value: "{string_field.string}", oninput}
             },
             RecordFieldValue::Bool(value) => rsx! {
-                Input { key: "{name()}-input", id: "{name()}", type: "checkbox", oninput: move |ev: Event<FormData>| { field.with_mut(|field| field.value = RecordFieldValue::Bool(ev.checked())) } }
+                Input { key: "{name()}-input", id: "{name()}", type: "checkbox", checked: *value, oninput: move |ev: Event<FormData>| { field.with_mut(|field| field.value = RecordFieldValue::Bool(ev.checked())) } }
             },
             RecordFieldValue::Record { table_name, id} => {
                 let db = use_context::<Db>();
 
-                // let table = db.table(&table_name).unwrap();
+                let table = db.table(&table_name).unwrap();
 
-                // let display_field = table.main_display_field().and_then(|name| {
-                //     let field = table.field(name)?;
-
-                //     Some((field.offset, &field.ty))
-                // });
+                let display_field = table.main_display_field();
 
                 let records = db.get_all(&table_name).unwrap();
 
 
                 let options = records.iter().enumerate().map(|(idx, value)| {
-                    // let text_value = if let Some((offset, ty)) = display_field {
-                    //     let unpacker = ByteUnpacker::new(value.bytes());
-                    //     let value = unpack_to_string(offset, &unpacker, ty, &db);
-                    //     // unpacker.unpack("name")
-                    //     value.unwrap_or_default()
-                    // } else {
-                    //     id_text(value.id())
-                    // };
+                    let text_value = if let Some(Named { name: _, value: field }) = display_field {
+                        extract_value(value, field, &db) 
+                    } else {
+                        id_text(value.id())
+                    };
 
-                    let text_value = id_text(value.id());
 
                     rsx! {
                         SelectOption::<Ulid> {
@@ -254,11 +247,14 @@ impl RecordField {
 
     pub fn value(&self) -> Option<FieldValue> {
         match &self.value {
-            RecordFieldValue::Timestamp(date_time) => Some(FieldValue::DateTime(*date_time)),
+            RecordFieldValue::Timestamp(date_time) => Some(FieldValue::Timestamp(*date_time)),
             RecordFieldValue::Text(text) => Some(FieldValue::Text(text.clone())),
             RecordFieldValue::StringField(field) => field.value.as_ref().ok().cloned(),
             RecordFieldValue::Bool(value) => Some(FieldValue::Bool(*value)),
-            RecordFieldValue::Record { id, .. } => id.map(|id| FieldValue::RecordId(id)),
+            RecordFieldValue::Record { id, table_name } => id.map(|id| FieldValue::RecordId {
+                id,
+                table_name: table_name.clone(),
+            }),
         }
     }
 }
@@ -280,7 +276,7 @@ impl RecordStringField {
         self.string = string;
 
         let value = match &self.ty {
-            StringFieldType::IntI32 => i32::from_str(&self.string).map(FieldValue::I32),
+            StringFieldType::IntI32 => i32::from_str(&self.string).map(FieldValue::Int),
             // StringFieldType::Number(num) => match num {
             //     NumberFieldType::U8 => u8::from_str(&self.string).map(FieldValue::U8),
             //     NumberFieldType::U16 => u16::from_str(&self.string).map(FieldValue::U16),

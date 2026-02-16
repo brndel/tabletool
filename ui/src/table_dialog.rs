@@ -27,7 +27,7 @@ pub fn TableDialogButton(on_submit: Callback<Named<TableDef>, ()>) -> Element {
 
     let mut name = use_signal(|| String::new());
     let mut fields = use_store(|| Vec::<FieldStore>::new());
-    let mut main_display_field_idx = use_signal(|| Option::<usize>::None);
+    let mut main_display_field_idx = use_signal(|| Option::<u32>::None);
 
     let mut onsubmit_form = move || {
         let name = name.peek();
@@ -35,13 +35,10 @@ pub fn TableDialogButton(on_submit: Callback<Named<TableDef>, ()>) -> Element {
 
         let fields = fields
             .iter()
-            .map(|field| (field.name.clone().into(), TableFieldDef { ty: field.ty.clone() }))
+            .map(|field| Named::new(field.name.clone(), TableFieldDef { ty: field.ty.clone(), has_index: field.has_index }))
             .collect();
 
-        // let main_display_field_name =
-        //     main_display_field_idx().and_then(|idx| Some(fields.get(idx)?.name.clone()));
-
-        let table = TableDef { fields };
+        let table = TableDef { fields, main_display_field: main_display_field_idx() };
 
         on_submit(Named {
             name: name.clone().into(),
@@ -49,13 +46,6 @@ pub fn TableDialogButton(on_submit: Callback<Named<TableDef>, ()>) -> Element {
         });
         
         open.set(false);
-        // match Table::new(fields, main_display_field_name) {
-        //     Ok(table) => {
-        //     }
-        //     Err(err) => {
-        //         error!("couldnt create table {:?}", err);
-        //     }
-        // }
     };
 
     rsx! {
@@ -115,8 +105,8 @@ pub fn TableDialogButton(on_submit: Callback<Named<TableDef>, ()>) -> Element {
                             flex_direction: "row",
                             gap: ".5rem",
                             Button {
-                                onclick: move |_| main_display_field_idx.set(Some(idx)),
-                                variant: if main_display_field_idx() == Some(idx) { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                                onclick: move |_| main_display_field_idx.set(Some(idx as u32)),
+                                variant: if main_display_field_idx() == Some(idx as u32) { ButtonVariant::Primary } else { ButtonVariant::Secondary },
                                 Icon {
                                     width: 12,
                                     height: 12,

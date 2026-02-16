@@ -1,8 +1,11 @@
-
-use bytepack::{ByteUnpacker, Unpack};
 use chrono::{DateTime, Local, Utc};
 use db::{Db, Ulid};
-use db_core::{defs::table::{TableData, TableFieldData}, record::RecordBytes, ty::FieldTy};
+use db_core::{
+    defs::table::{TableData, TableFieldData},
+    named::Named,
+    record::RecordBytes,
+    value::FieldValue,
+};
 use dioxus::prelude::*;
 
 use crate::{
@@ -13,7 +16,7 @@ use crate::{
         },
         button::{Button, ButtonVariant},
     },
-    id_card::{id_text, IdCard},
+    id_card::{IdCard, id_text},
 };
 
 #[component]
@@ -26,7 +29,7 @@ pub fn DataTable(
     let mut is_delete_dialog_open = use_signal(|| None);
     let mut selected_id = use_signal(|| None);
 
-    let display_field = None;//table_v.main_display_field();
+    let display_field_idx = table.read().main_display_field_idx();
 
     let db = use_context::<Db>();
 
@@ -35,16 +38,16 @@ pub fn DataTable(
             thead {
                 tr {
                     th {"Id"}
-                    for field_name in table().fields.keys() {
+                    for (field_idx, Named { name: field_name, value: field }) in table().fields().enumerate() {
                         th {
                             Button {
                                 onclick: {
-                                    let has_index = false;//field.has_index;
+                                    let has_index = field.has_index;
                                     let field_name = field_name.clone();
                                     let db = db.clone();
                                     let table_name = table_name.clone();
                                     move |_| if has_index {
-                                        let query_result = db.index_query(&format!("#{}:{}", table_name, field_name), Some(db::FieldValue::DateTime(Utc::now())), None);
+                                        let query_result = db.index_query(&format!("#{}:{}", table_name, field_name), Some(FieldValue::Timestamp(Utc::now())), None);
 
                                         match query_result {
                                             Ok(result) => {
@@ -59,11 +62,11 @@ pub fn DataTable(
                                     }
                                 },
                                 variant: ButtonVariant::Ghost,
-                                if false { //field.has_index {
+                                if field.has_index {
                                     "#"
                                 }
                                 "{field_name}"
-                                if Some(field_name) == display_field {
+                                if Some(field_idx) == display_field_idx {
                                     "*"
                                 }
                             }
@@ -80,9 +83,9 @@ pub fn DataTable(
                                 id: record.id()
                             }
                         }
-                        for field in table.read().fields.values() {
+                        for field in table.read().fields() {
                             td {
-                                "{extract_value(record, field, &db)}"
+                                "{extract_value(record, &field.value, &db)}"
                             }
                         }
                         td {
@@ -127,60 +130,41 @@ pub fn DataTable(
     )
 }
 
-fn extract_value(
-    record: &RecordBytes,
-    field: &TableFieldData,
-    db: &Db,
-) -> String {
-    let unpacker = ByteUnpacker::new(record.bytes());
-
-    let s = unpack_to_string(&unpacker, field, db);
-
-    s.unwrap_or_else(|| "???".to_owned())
+pub fn extract_value(record: &RecordBytes, field: &TableFieldData, db: &Db) -> String {
+    match record.get_field(field) {
+        Some(value) => value_to_string(value, db),
+        None => "???".to_string(),
+    }
 }
 
-pub fn unpack_to_string(
-    unpacker: &ByteUnpacker,
-    field: &TableFieldData,
-    db: &Db,
-) -> Option<String> {
-    let offset = field.offset;
+pub fn value_to_string(value: FieldValue, db: &Db) -> String {
+    match value {
+        FieldValue::Int(value) => value.to_string(),
+        FieldValue::Bool(value) => value.to_string(),
+        FieldValue::Timestamp(date_time) => DateTime::<Local>::from(date_time)
+            .format("%d.%m.%Y %H:%M:%S")
+            .to_string(),
+        FieldValue::Text(value) => value,
+        FieldValue::RecordId { id, table_name } => {
+            let Some(table) = db.table(&table_name) else {
+                return format!("<ERROR: table '{table_name}' not found>");
+            };
 
-    match &field.ty {
-        FieldTy::IntI32 => i32::unpack(offset, &unpacker).map(|x| x.to_string()),
-        FieldTy::Timestamp => DateTime::<Utc>::unpack(offset, &unpacker).map(|dt| {
-            DateTime::<Local>::from(dt)
-                .format("%d.%m.%Y %H:%M:%S")
-                .to_string()
-        }),
-        FieldTy::Bool => bool::unpack(offset, unpacker).map(|x| x.to_string()),
-        FieldTy::Text => String::unpack(offset, &unpacker),
-        FieldTy::RecordId { table_name } => {
-            let id = Ulid::unpack(offset, &unpacker)?;
+            let display_field = table.main_display_field();
 
-            // let table = db.table(&table_name).unwrap();
-            // let format = table.packer_format();
-            // let display_field = table.main_display_field().and_then(|name| {
-            //     let ptr = format.field(name)?;
-            //     let field = table.field(name)?;
+            if let Some(field) = display_field {
+                let Some(value) = db.get(&table_name, id) else {
+                    return format!("<ERROR: record '{table_name}:{id}' does not exist>");
+                };
 
-            //     Some((ptr.pointer.offset, &field.ty))
-            // });
+                let Some(field_value) = value.get_field(&field.value) else {
+                    return format!("<ERROR: could not get field '{}' of '{table_name}:{id}'>", field.name);
+                };
 
-            // let text_value = if let Some((offset, ty)) = display_field {
-            //     let value = db.get(table_name, id)?;
-
-            //     let unpacker = ByteUnpacker::new(value.bytes());
-            //     let value = unpack_to_string(offset, &unpacker, ty, &db);
-
-            //     value.unwrap_or_default()
-            // } else {
-            //     id_text(id)
-            // };
-
-            let text_value = id_text(id);
-
-            Some(text_value)
+                value_to_string(field_value, db)
+            } else {
+                id_text(id)
+            }
         }
     }
 }

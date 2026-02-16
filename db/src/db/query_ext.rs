@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{Db, db::TableWithIdDef, error::DbError};
 
 use chrono::Utc;
-use db_core::{expr::EvalCtx, query::Query, record::RecordBytes};
+use db_core::{expr::EvalCtx, query::Query, record::RecordBytes, value::{FieldValue, Value}};
 use redb::{ReadableDatabase, ReadableTable};
 use ulid::Ulid;
 
@@ -51,7 +51,9 @@ impl Db {
                     drop(eval_ctx.records);
                     tables_map = eval_ctx.tables;
 
-                    if result == Some(db_core::value::Value::Bool(true)) {
+                    dbg!(&result);
+
+                    if result == Some(Value::Field(FieldValue::Bool(true))) {
                         true
                     } else {
                         false

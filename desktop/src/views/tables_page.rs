@@ -47,7 +47,7 @@ pub fn TablePage(name: String) -> Element {
         move || db.get_all(&table_name()).unwrap_or_default()
     });
 
-    let mut update_records = {
+    let update_records = {
         let name = table_name.clone();
         let db = db.clone();
 

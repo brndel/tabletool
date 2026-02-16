@@ -1,3 +1,5 @@
+extern crate self as bytepack;
+
 mod pack;
 mod pack_pointer;
 mod packer;

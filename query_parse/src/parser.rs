@@ -1,9 +1,9 @@
 use chumsky::{
-    IterParser, Parser, combinator::To, error::Rich, extra, pratt::{infix, left, prefix}, prelude::{choice, just, recursive}, select, span::SimpleSpan
+    IterParser, Parser, error::Rich, extra, pratt::{infix, left, prefix}, prelude::{choice, just, recursive}, select, span::SimpleSpan
 };
 use db_core::{
     expr::{BinaryOp, Expr, MathOp, UnaryOp},
-    value::Value,
+    value::FieldValue,
 };
 
 use db_core::query::Query;
@@ -51,22 +51,26 @@ pub fn parse_expr<'token, 'src: 'token>()
         }
         .try_map(|num, span| {
             if let Ok(value) = num.parse() {
-                Ok(Value::Int(value))
+                Ok(FieldValue::Int(value))
             } else {
                 Err(Rich::custom(span, "Invalid integer"))
             }
         });
 
         let boolean = select! {
-            Token::Keyword(Keyword::True) => Value::Bool(true),
-            Token::Keyword(Keyword::False) => Value::Bool(false),
+            Token::Keyword(Keyword::True) => FieldValue::Bool(true),
+            Token::Keyword(Keyword::False) => FieldValue::Bool(false),
+        };
+
+        let string = select! {
+            Token::StringLiteral(value) => FieldValue::Text(value.to_owned())
         };
 
         let table_ident = select! {
             Token::Ident(ident) => Expr::TableAccess { name: ident.into() }
         };
 
-        let literal = num.or(boolean).map(Expr::Literal).or(table_ident);
+        let literal = num.or(boolean).or(string).map(Expr::Literal).or(table_ident);
 
         let paren_expr = expr.delimited_by(
             just(Token::Separator(Separator::ParenOpen)),

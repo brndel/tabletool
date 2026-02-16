@@ -1,7 +1,7 @@
 use bytepack::{ByteUnpacker, Unpack};
 use ulid::Ulid;
 
-use crate::{defs::table::TableFieldData, ty::FieldTy, value::Value};
+use crate::{defs::table::TableFieldData, ty::FieldTy, value::FieldValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordBytes {
@@ -29,13 +29,13 @@ impl RecordBytes {
         &self.bytes
     }
 
-    pub fn get_field(&self, field: &TableFieldData) -> Option<Value> {
+    pub fn get_field(&self, field: &TableFieldData) -> Option<FieldValue> {
         let value = match &field.ty {
-            FieldTy::IntI32 => Value::Int(self.unpack(field.offset)?),
-            FieldTy::Bool => Value::Bool(self.unpack(field.offset)?),
-            FieldTy::Timestamp => Value::DateTime(self.unpack(field.offset)?),
-            FieldTy::Text => Value::Text(self.unpack(field.offset)?),
-            FieldTy::RecordId { table_name } => todo!(),
+            FieldTy::IntI32 => FieldValue::Int(self.unpack(field.offset)?),
+            FieldTy::Bool => FieldValue::Bool(self.unpack(field.offset)?),
+            FieldTy::Timestamp => FieldValue::Timestamp(self.unpack(field.offset)?),
+            FieldTy::Text => FieldValue::Text(self.unpack(field.offset)?),
+            FieldTy::RecordId { table_name } => FieldValue::RecordId { id: self.unpack(field.offset)?, table_name: table_name.clone() },
         };
 
         Some(value)

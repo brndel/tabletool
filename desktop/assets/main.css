@@ -30,3 +30,7 @@
 .data-table tr:hover {
     background-color: var(--primary-color-4);
 }
+
+.query-input {
+    font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
+}

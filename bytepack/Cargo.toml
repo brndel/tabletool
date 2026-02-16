@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 ulid.workspace = true
 chrono.workspace = true
+bytepack_derive = { path = "./bytepack_derive" }
