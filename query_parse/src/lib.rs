@@ -60,6 +60,7 @@ mod tests {
         let value = Query {
             table_name: "user".into(),
             filter: Some(expr),
+            group_by: None
         };
 
         assert_eq!(query, value);
@@ -72,7 +73,7 @@ mod tests {
             Some(Ty::Field(FieldTy::Bool))
         );
         assert_eq!(
-            query.filter.as_ref().and_then(|filter| filter.eval(&eval_ctx)),
+            query.filter.as_ref().and_then(|filter| filter.eval(&eval_ctx).ok()),
             Some(Value::Field(FieldValue::Bool(true)))
         );
     }

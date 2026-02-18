@@ -16,7 +16,7 @@ pub struct TableFieldDef {
     pub has_index: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct TableData {
     fields: Vec<Named<TableFieldData>>,
     index: Vec<(Arc<str>, usize)>,
@@ -24,7 +24,7 @@ pub struct TableData {
     fixed_byte_count: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct TableFieldData {
     pub ty: FieldTy,
     pub offset: u32,
@@ -129,21 +129,36 @@ impl TableData {
     pub fn fields(&self) -> impl Iterator<Item = &Named<TableFieldData>> {
         self.fields.iter()
     }
+
+    pub fn has_field(&self, name: &str) -> bool {
+        self.index_of_field(name).is_some()
+    }
 }
 
-impl PackFormat for TableData {
-    type Field = TableFieldData;
-
-    fn field<'a>(&'a self, name: &str) -> Option<&'a Self::Field> {
+impl TableData {
+    fn index_of_field(&self, name: &str) -> Option<usize> {
         match self
             .index
             .binary_search_by_key(&name, |(name, _)| name.as_ref())
         {
             Ok(index_idx) => {
                 let (_, field_idx) = self.index[index_idx];
-                Some(&self.fields[field_idx].value)
+                Some(field_idx)
             }
             Err(_) => None,
+        }
+    }
+}
+
+impl PackFormat for TableData {
+    type Field = TableFieldData;
+
+    fn field<'a>(&'a self, name: &str) -> Option<&'a Self::Field> {
+        match self.index_of_field(name) {
+            Some(idx) => {
+                Some(&self.fields[idx].value)
+            },
+            None => None,
         }
     }
 

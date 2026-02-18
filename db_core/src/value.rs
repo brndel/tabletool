@@ -11,7 +11,7 @@ use crate::{
     ty::{FieldTy, Ty},
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum FieldValue {
     Int(i32),
     Bool(bool),
@@ -20,7 +20,7 @@ pub enum FieldValue {
     RecordId { id: Ulid, table_name: Arc<str> },
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Value {
     Field(FieldValue),
     Record {

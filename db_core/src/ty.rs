@@ -10,7 +10,7 @@ use crate::{
     named::Named,
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum FieldTy {
     IntI32,
     Bool,
@@ -35,6 +35,12 @@ impl FieldTy {
 pub enum Ty {
     Field(FieldTy),
     Table(Named<Arc<TableData>>),
+}
+
+impl From<FieldTy> for Ty {
+    fn from(value: FieldTy) -> Self {
+        Ty::Field(value)
+    }
 }
 
 type TagBytes = [u8; 4];

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytepack::{Pack, Unpack};
 
 
-#[derive(Debug, PartialEq, Eq, Clone, Pack, Unpack)]
+#[derive(Debug, PartialEq, Eq, Clone, Pack, Unpack, Hash)]
 pub struct Named<T> {
     pub name: Arc<str>,
     pub value: T,

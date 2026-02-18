@@ -12,7 +12,7 @@ pub use hero::Hero;
 pub use id_card::IdCard;
 pub use navbar::Navbar;
 pub use record_dialog::RecordDialogButton;
-pub use table::DataTable;
+pub use table::*;
 pub use table_dialog::TableDialogButton;
 
 pub use components::*;

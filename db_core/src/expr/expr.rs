@@ -4,7 +4,8 @@ use bytepack::PackFormat;
 
 use crate::{
     expr::{
-        EvalCtx,
+        DidYouMeanHint, EvalCtx,
+        error::EvalErr,
         op::{BinaryOp, UnaryOp},
         ty_ctx::TyCtx,
     },
@@ -85,9 +86,9 @@ impl Expr {
         }
     }
 
-    pub fn eval(&self, ctx: &EvalCtx) -> Option<Value> {
+    pub fn eval(&self, ctx: &EvalCtx) -> Result<Value, EvalErr> {
         match self {
-            Expr::Literal(value) => Some(Value::Field(value.clone())),
+            Expr::Literal(value) => Ok(Value::Field(value.clone())),
             Expr::BinaryOp { a, op, b } => {
                 let a = a.eval(ctx)?;
                 let b = b.eval(ctx)?;
@@ -104,18 +105,56 @@ impl Expr {
 
                 match value {
                     Value::Record { table, record } => {
-                        let field = table.value.field(field)?;
+                        let field =
+                            table
+                                .value
+                                .field(field)
+                                .ok_or_else(|| EvalErr::UnknownField {
+                                    name: field.clone(),
+                                    table_name: table.name.clone(),
+                                })?;
 
-                        record.get_field(field).map(Into::into)
+                        record
+                            .get_field(field)
+                            .map(Into::into)
+                            .ok_or(EvalErr::Bytepack)
                     }
-                    _ => None,
+                    v => Err(EvalErr::MissmatchedTypes {
+                        found: v.ty(),
+                        expected: None,
+                    }),
                 }
             }
             Expr::TableAccess { name } => {
-                let record = ctx.records.get(name)?;
-                let table = ctx.tables.get(name)?;
+                let (Some(record), Some(table)) = (ctx.records.get(name), ctx.tables.get(name))
+                else {
+                    let table_with_field_name = ctx
+                        .tables
+                        .iter()
+                        .filter_map(|(table_name, table)| {
+                            if ctx.records.contains_key(table_name) && table.has_field(name) {
+                                Some(table_name.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .next();
 
-                Some(Value::Record {
+                    let hint = match table_with_field_name {
+                        Some(table_name) => DidYouMeanHint::TableWithField {
+                            table_name,
+                            field_name: name.clone(),
+                        },
+                        None => DidYouMeanHint::None,
+                    };
+
+                    return Err(EvalErr::UnknownTable {
+                        name: name.clone(),
+                        did_you_mean_hint: hint,
+                    });
+                };
+
+                Ok(Value::Record {
                     table: Named {
                         name: name.clone(),
                         value: table.clone(),
@@ -124,8 +163,27 @@ impl Expr {
                 })
             }
             Expr::FnCall { name, args } => match name.as_ref() {
-                "now" if args.is_empty() => Some(FieldValue::Timestamp(ctx.now).into()),
-                _ => None,
+                "now" if args.is_empty() => Ok(FieldValue::Timestamp(ctx.now).into()),
+                "str_len" => {
+                    if args.len() != 1 {
+                        return Err(EvalErr::InvalidFunctionArgCount {
+                            name: name.clone(),
+                            found: args.len(),
+                            expected: 1,
+                        });
+                    }
+                    let arg = args[0].eval(ctx)?;
+
+                    let Value::Field(FieldValue::Text(input)) = arg else {
+                        return Err(EvalErr::MissmatchedTypes {
+                            found: arg.ty(),
+                            expected: Some(FieldTy::Text.into()),
+                        });
+                    };
+
+                    return Ok(FieldValue::Int(input.len() as _).into());
+                }
+                _ => Err(EvalErr::UnknownFunction { name: name.clone() }),
             },
         }
     }

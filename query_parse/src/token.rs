@@ -16,6 +16,7 @@ pub enum Token<'src> {
 pub enum Keyword {
     Query,
     Where,
+    GroupBy,
     True,
     False,
 }
@@ -27,6 +28,7 @@ impl FromStr for Keyword {
         match s {
             "query" => Ok(Self::Query),
             "where" => Ok(Self::Where),
+            "group_by" => Ok(Self::GroupBy),
             "true" => Ok(Self::True),
             "false" => Ok(Self::False),
             _ => Err(()),

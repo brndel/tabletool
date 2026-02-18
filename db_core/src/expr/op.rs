@@ -1,5 +1,6 @@
 use crate::{
-    ty::FieldTy,
+    expr::EvalErr,
+    ty::{FieldTy, Ty},
     value::{FieldValue, Value},
 };
 
@@ -81,9 +82,16 @@ impl BinaryOp {
         }
     }
 
-    pub fn eval(&self, a: Value, b: Value) -> Option<FieldValue> {
-        let (Value::Field(a), Value::Field(b)) = (a, b) else {
-            return None;
+    pub fn eval(&self, a: Value, b: Value) -> Result<FieldValue, EvalErr> {
+        let (a, b) = match (a, b) {
+            (Value::Field(a), Value::Field(b)) => (a, b),
+            (a, b) => {
+                return Err(EvalErr::InvalidTypeForBinaryOp {
+                    op: self.clone(),
+                    a: a.ty(),
+                    b: b.ty(),
+                });
+            }
         };
 
         match (self, a, b) {
@@ -95,18 +103,26 @@ impl BinaryOp {
                     MathOp::Div => a / b,
                 };
 
-                Some(FieldValue::Int(result))
+                Ok(FieldValue::Int(result))
             }
-            (BinaryOp::Math(_), _, _) => None,
+            (BinaryOp::Math(_), a, b) => Err(EvalErr::InvalidTypeForBinaryOp {
+                op: self.clone(),
+                a: Ty::Field(a.ty()),
+                b: Ty::Field(b.ty()),
+            }),
             (BinaryOp::Logic(logic_op), FieldValue::Bool(a), FieldValue::Bool(b)) => {
                 let result = match logic_op {
                     LogicOp::And => a && b,
                     LogicOp::Or => a || b,
                 };
 
-                Some(FieldValue::Bool(result))
+                Ok(FieldValue::Bool(result))
             }
-            (BinaryOp::Logic(_), _, _) => None,
+            (BinaryOp::Logic(_), a, b) => Err(EvalErr::InvalidTypeForBinaryOp {
+                op: self.clone(),
+                a: Ty::Field(a.ty()),
+                b: Ty::Field(b.ty()),
+            }),
             (BinaryOp::Compare(compare_op), FieldValue::Int(a), FieldValue::Int(b)) => {
                 let result = match compare_op {
                     CompareOp::Less => a < b,
@@ -114,7 +130,7 @@ impl BinaryOp {
                     CompareOp::Greater => a > b,
                     CompareOp::GreaterEq => a >= b,
                 };
-                Some(FieldValue::Bool(result))
+                Ok(FieldValue::Bool(result))
             }
             (BinaryOp::Compare(compare_op), FieldValue::Timestamp(a), FieldValue::Timestamp(b)) => {
                 let result = match compare_op {
@@ -123,22 +139,30 @@ impl BinaryOp {
                     CompareOp::Greater => a > b,
                     CompareOp::GreaterEq => a >= b,
                 };
-                Some(FieldValue::Bool(result))
+                Ok(FieldValue::Bool(result))
             }
-            (BinaryOp::Compare(_), _, _) => None,
+            (BinaryOp::Compare(_), a, b) => Err(EvalErr::InvalidTypeForBinaryOp {
+                op: self.clone(),
+                a: Ty::Field(a.ty()),
+                b: Ty::Field(b.ty()),
+            }),
             (BinaryOp::Eq(eq_op), FieldValue::Int(a), FieldValue::Int(b)) => {
-                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
+                Ok(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
             (BinaryOp::Eq(eq_op), FieldValue::Bool(a), FieldValue::Bool(b)) => {
-                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
+                Ok(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
             (BinaryOp::Eq(eq_op), FieldValue::Timestamp(a), FieldValue::Timestamp(b)) => {
-                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
+                Ok(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
             (BinaryOp::Eq(eq_op), FieldValue::Text(a), FieldValue::Text(b)) => {
-                Some(FieldValue::Bool(eq_op.eval(&a, &b)))
+                Ok(FieldValue::Bool(eq_op.eval(&a, &b)))
             }
-            (BinaryOp::Eq(_), _, _) => None,
+            (BinaryOp::Eq(_), a, b) => Err(EvalErr::InvalidTypeForBinaryOp {
+                op: self.clone(),
+                a: Ty::Field(a.ty()),
+                b: Ty::Field(b.ty()),
+            }),
         }
     }
 }
@@ -172,15 +196,26 @@ impl UnaryOp {
         }
     }
 
-    pub fn eval(&self, value: Value) -> Option<Value> {
-        let Value::Field(value) = value else {
-            return None;
+    pub fn eval(&self, value: Value) -> Result<Value, EvalErr> {
+        let value = match value {
+            Value::Field(value) => value,
+            value => {
+                return Err(EvalErr::InvalidTypeForUnaryOp {
+                    op: self.clone(),
+                    ty: value.ty(),
+                });
+            }
         };
 
         match (self, value) {
-            (UnaryOp::Negate, FieldValue::Int(value)) => Some(FieldValue::Int(-value).into()),
-            (UnaryOp::LogicNot, FieldValue::Bool(value)) => Some(FieldValue::Bool(!value).into()),
-            _ => None,
+            (UnaryOp::Negate, FieldValue::Int(value)) => Ok(FieldValue::Int(-value).into()),
+            (UnaryOp::LogicNot, FieldValue::Bool(value)) => Ok(FieldValue::Bool(!value).into()),
+            (_, value) => {
+                return Err(EvalErr::InvalidTypeForUnaryOp {
+                    op: self.clone(),
+                    ty: Ty::Field(value.ty()),
+                });
+            }
         }
     }
 }

@@ -115,7 +115,6 @@ fn RecordFieldInput(field: Store<RecordField>) -> Element {
                 rsx! {
                     Label { key: "{name()}-label", html_for: "{name()}", "{name()}" }
                     DateTimePicker {
-                        key: "{name()}-input",
                         date_time: date,
                         on_input: move |date| field.with_mut(|field| field.value = RecordFieldValue::Timestamp(date))
                     }
@@ -124,12 +123,12 @@ fn RecordFieldInput(field: Store<RecordField>) -> Element {
             RecordFieldValue::Text(text) => rsx! {
                 Label { key: "{name()}-label", html_for: "{name()}", "{name()}" }
 
-                Input { key: "{name()}-input", id: "{name()}", placeholder: "{name()}", value: "{text}", oninput: move |ev: Event<FormData>| { field.with_mut(|field| field.value = RecordFieldValue::Text(ev.value())) } }
+                Input { id: "{name()}", placeholder: "{name()}", value: "{text}", oninput: move |ev: Event<FormData>| { field.with_mut(|field| field.value = RecordFieldValue::Text(ev.value())) } }
             },
             RecordFieldValue::StringField(string_field) => rsx! {
                 Label { key: "{name()}-label", html_for: "{name()}", "{name()}" }
 
-                Input { class: if string_field.value.is_err() {"input invalid"} else {"input"}, key: "{name()}-input", id: "{name()}", placeholder: "{name()}", value: "{string_field.string}", oninput}
+                Input { class: if string_field.value.is_err() {"input invalid"} else {"input"}, id: "{name()}", placeholder: "{name()}", value: "{string_field.string}", oninput}
             },
             RecordFieldValue::Bool(value) => rsx! {
                 Input { key: "{name()}-input", id: "{name()}", type: "checkbox", checked: *value, oninput: move |ev: Event<FormData>| { field.with_mut(|field| field.value = RecordFieldValue::Bool(ev.checked())) } }

@@ -19,14 +19,17 @@ pub fn parser<'token, 'src: 'token>()
 
     let expr = parse_expr();
 
-    let filter = just(Token::Keyword(Keyword::Where)).ignore_then(expr);
+    let filter = just(Token::Keyword(Keyword::Where)).ignore_then(expr.clone());
+    let group = just(Token::Keyword(Keyword::GroupBy)).ignore_then(expr);
 
     just(Token::Keyword(Keyword::Query))
         .ignore_then(ident)
         .then(filter.or_not())
-        .map(|(name, filter)| Query {
+        .then(group.or_not())
+        .map(|((name, filter), group)| Query {
             table_name: name.into(),
             filter,
+            group_by: group
         })
 }
 
@@ -141,8 +144,8 @@ pub fn parse_expr<'token, 'src: 'token>()
             infix(left(9), product_op, binary_fold!()),
             infix(left(8), sum_op, binary_fold!()),
             infix(left(7), compare_op, binary_fold!()),
-            infix(left(6), logic_op, binary_fold!()),
-            infix(left(5), eq_op, binary_fold!()),
+            infix(left(6), eq_op, binary_fold!()),
+            infix(left(5), logic_op, binary_fold!()),
         ));
 
         ops

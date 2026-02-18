@@ -1,10 +1,7 @@
 use chrono::{DateTime, Local, Utc};
 use db::{Db, Ulid};
 use db_core::{
-    defs::table::{TableData, TableFieldData},
-    named::Named,
-    record::RecordBytes,
-    value::FieldValue,
+    defs::table::TableFieldData, named::Named, query::QueryResultRecords, record::RecordBytes, value::{FieldValue, Value}
 };
 use dioxus::prelude::*;
 
@@ -21,15 +18,14 @@ use crate::{
 
 #[component]
 pub fn DataTable(
-    items: ReadSignal<Vec<RecordBytes>>,
-    delete: Callback<Ulid, ()>,
-    table: ReadSignal<TableData>,
+    records: ReadSignal<QueryResultRecords>,
+    delete: Option<Callback<Ulid, ()>>,
     table_name: String,
 ) -> Element {
     let mut is_delete_dialog_open = use_signal(|| None);
     let mut selected_id = use_signal(|| None);
 
-    let display_field_idx = table.read().main_display_field_idx();
+    let display_field_idx = records.read().format.main_display_field_idx();
 
     let db = use_context::<Db>();
 
@@ -38,7 +34,7 @@ pub fn DataTable(
             thead {
                 tr {
                     th {"Id"}
-                    for (field_idx, Named { name: field_name, value: field }) in table().fields().enumerate() {
+                    for (field_idx, Named { name: field_name, value: field }) in records.read().format.fields().enumerate() {
                         th {
                             Button {
                                 onclick: {
@@ -72,33 +68,37 @@ pub fn DataTable(
                             }
                         }
                     }
-                    th {"…"}
+                    if delete.is_some() {
+                        th {"…"}
+                    }
                 }
             }
             tbody {
-                for record in items().iter() {
+                for record in records.read().records.iter() {
                     tr { key: "{record.id()}",
                         td {
                             IdCard {
                                 id: record.id()
                             }
                         }
-                        for field in table.read().fields() {
+                        for field in records.read().format.fields() {
                             td {
                                 "{extract_value(record, &field.value, &db)}"
                             }
                         }
-                        td {
-                            Button {
-                                variant: ButtonVariant::Outline,
-                                onclick: {
-                                    let id = record.id();
-                                    move |_| {
-                                        selected_id.set(Some(id));
-                                        is_delete_dialog_open.set(Some(true));
-                                    }
-                                },
-                                "Delete"
+                        if delete.is_some() {
+                            td {
+                                Button {
+                                    variant: ButtonVariant::Outline,
+                                    onclick: {
+                                        let id = record.id();
+                                        move |_| {
+                                            selected_id.set(Some(id));
+                                            is_delete_dialog_open.set(Some(true));
+                                        }
+                                    },
+                                    "Delete"
+                                }
                             }
                         }
                     }
@@ -116,7 +116,7 @@ pub fn DataTable(
                     AlertDialogCancel { "Cancel" }
                     AlertDialogAction { on_click:
                         move |_| {
-                            if let Some(id) = *selected_id.read() {
+                            if let Some(delete) = delete && let Some(id) = *selected_id.read() {
                                 delete(id);
                             }
                             selected_id.set(None);
@@ -132,12 +132,19 @@ pub fn DataTable(
 
 pub fn extract_value(record: &RecordBytes, field: &TableFieldData, db: &Db) -> String {
     match record.get_field(field) {
-        Some(value) => value_to_string(value, db),
+        Some(value) => field_value_to_string(value, db),
         None => "???".to_string(),
     }
 }
 
-pub fn value_to_string(value: FieldValue, db: &Db) -> String {
+pub fn value_to_string(value: Value, db: &Db) -> String {
+    match value {
+        Value::Field(value) => field_value_to_string(value, db),
+        Value::Record { table, record } => format!("record data {}:{}", table.name, record.id()),
+    }
+}
+
+pub fn field_value_to_string(value: FieldValue, db: &Db) -> String {
     match value {
         FieldValue::Int(value) => value.to_string(),
         FieldValue::Bool(value) => value.to_string(),
@@ -161,7 +168,7 @@ pub fn value_to_string(value: FieldValue, db: &Db) -> String {
                     return format!("<ERROR: could not get field '{}' of '{table_name}:{id}'>", field.name);
                 };
 
-                value_to_string(field_value, db)
+                field_value_to_string(field_value, db)
             } else {
                 id_text(id)
             }

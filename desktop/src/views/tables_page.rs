@@ -1,16 +1,18 @@
-use db_core::record::RecordBytes;
+use std::sync::Arc;
+
+use db_core::{query::QueryResultRecords, record::RecordBytes};
 use dioxus::prelude::*;
 
 use db::{Db, Ulid};
 
 use ui::{
+    DataTable, RecordDialogButton,
     alert_dialog::{
         AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
         AlertDialogRoot, AlertDialogTitle,
     },
     button::{Button, ButtonVariant},
     table_tab_bar::{TableTab, TableTabBar},
-    DataTable, RecordDialogButton,
 };
 
 use crate::Route;
@@ -26,33 +28,49 @@ pub fn TablePage(name: String) -> Element {
 
     let mut table_name = use_signal(|| name.clone());
 
-    let mut table_format = use_store({
+    fn query_all_records(db: &Db, name: &str) -> Option<QueryResultRecords> {
+        Some(QueryResultRecords {
+            records: db.get_all(name)?,
+            format: Arc::new(db.table(name)?),
+        })
+    }
+
+    let mut records = use_store({
         let db = db.clone();
-        move || db.table(&table_name())
+        move || query_all_records(&db, &table_name.read())
+    });
+
+    use_effect({
+        use_reactive!(|name| {
+            table_name.set(name);
+        })
     });
 
     use_effect({
         let db = db.clone();
-        use_reactive!(|name| {
-            table_name.set(name);
-
-            table_format.set(db.table(&table_name()))
-        })
+        
+        move || {
+            records.set(query_all_records(&db, &table_name.read()));
+        }
     });
 
-    let table_format = table_format.transpose();
-
-    let mut records = use_memo({
-        let db = db.clone();
-        move || db.get_all(&table_name()).unwrap_or_default()
+    let table_format = use_signal(|| {
+        records
+            .transpose()
+            .map(|result| result.read().format.as_ref().clone())
     });
+
+    // let mut records = use_memo({
+    //     let db = db.clone();
+    //     move || db.get_all(&table_name()).unwrap_or_default()
+    // });
 
     let update_records = {
-        let name = table_name.clone();
         let db = db.clone();
 
         move || {
-            records.set(db.get_all(&name()).unwrap_or_default());
+            records.set(query_all_records(&db, &table_name.read()));
+            // records.set(db.get_all(&name()).unwrap_or_default());
         }
     };
 
@@ -109,7 +127,7 @@ pub fn TablePage(name: String) -> Element {
 
             // Button { onclick: move |_| update_records(), "Reload" }
 
-            if let Some(table_format) = table_format {
+            if let Some(table_format) = table_format() {
                 RecordDialogButton {
                     on_submit: insert_record,
                     table: table_format
@@ -123,11 +141,10 @@ pub fn TablePage(name: String) -> Element {
             Button { onclick: move |_| is_delete_table_dialog_open.set(Some(true)), variant: ButtonVariant::Destructive, "Delete Table" }
         }
 
-        if let Some(table_format) = table_format {
+        if let Some(records) = records.transpose() {
             DataTable {
-                items: records,
+                records: records,
                 delete: delete_record.clone(),
-                table: table_format,
                 table_name: table_name(),
             }
         } else {

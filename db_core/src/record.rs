@@ -3,7 +3,7 @@ use ulid::Ulid;
 
 use crate::{defs::table::TableFieldData, ty::FieldTy, value::FieldValue};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordBytes {
     id: Ulid,
     bytes: Vec<u8>,

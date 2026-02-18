@@ -1,14 +1,15 @@
 use chrono::Utc;
 use db::{Db, DbError};
 use db_core::{
-    defs::table::TableData,
     expr::EvalCtx,
-    query::Query,
-    record::RecordBytes,
+    query::{
+        Query, QueryResult, QueryResultGroupStoreExt, QueryResultStoreExt,
+        QueryResultStoreTransposed,
+    },
 };
 use dioxus::prelude::*;
 use query_parse::parse_expr;
-use ui::DataTable;
+use ui::{DataTable, value_to_string};
 
 #[component]
 pub fn ExprPage() -> Element {
@@ -34,14 +35,14 @@ pub fn ExprPage() -> Element {
         let db = db.clone();
         move || {
             println!("creating store");
-            Some(QueryResult::new(query()?, &db))
+            Some(UiQueryResult::new(query()?, &db))
         }
     });
 
     use_effect(move || {
         if let Some(query) = query() {
             println!("updating store");
-            query_result.set(Some(QueryResult::new(query, &db)));
+            query_result.set(Some(UiQueryResult::new(query, &db)));
         }
     });
 
@@ -52,6 +53,11 @@ pub fn ExprPage() -> Element {
             spellcheck: false,
             autocomplete: false,
             oninput: move |e| text_value.set(e.value()),
+            value: "{text_value}"
+        }
+        button {
+            onclick: move |_| text_value.set("query project group_by project.group".to_owned()),
+            "query project group_by project.group"
         }
         div {
             "Expr: {expr:?}",
@@ -62,36 +68,52 @@ pub fn ExprPage() -> Element {
         div {
             "Query: {query:?}",
         }
-        if let Some(result) = query_result.transpose() && let Ok(items) = result.result().transpose() && let Some(table) = result.result_table().transpose() {
-            DataTable {
-                items: items,
-                delete: |_| (),
-                table: table,
-                table_name: "Foobar",
+        if let Some(result) = query_result.transpose()
+            && let Ok(result) = result.result().transpose()
+        {
+            QueryResultView { result }
+        } else {
+            "Error ?!?"
+        }
+    }
+}
+
+#[component]
+pub fn QueryResultView(result: Store<QueryResult>) -> Element {
+    match result.transpose() {
+        QueryResultStoreTransposed::Records(records) => {
+            rsx! {
+                DataTable {
+                    records: records,
+                    table_name: "Foobar",
+                }
             }
         }
-        // div {
-        //     "Result: {query_result:?}",
-        // }
+        QueryResultStoreTransposed::Grouped { groups } => {
+            let db = use_context::<Db>();
+
+            rsx! {
+                for group in groups.iter() {
+                    div {
+                        "{value_to_string(group.group().read().clone(), &db)}"
+                        QueryResultView { result: group.result() }
+                    }
+                }
+            }
+        }
     }
 }
 
 #[derive(Store)]
-struct QueryResult {
+struct UiQueryResult {
     query: Query,
-    result: Result<Vec<RecordBytes>, DbError>,
-    result_table: Option<TableData>,
+    result: Result<QueryResult, DbError>,
 }
 
-impl QueryResult {
+impl UiQueryResult {
     pub fn new(query: Query, db: &Db) -> Self {
         let result = db.run_query(&query);
-        let result_table = db.table(&query.table_name);
 
-        Self {
-            query,
-            result,
-            result_table,
-        }
+        Self { query, result }
     }
 }
