@@ -9,6 +9,7 @@ pub enum Token<'src> {
     Op(Op),
     Number(&'src str),
     StringLiteral(&'src str),
+    SpecialLiteral { tag: &'src str, content: &'src str },
     Separator(Separator),
 }
 

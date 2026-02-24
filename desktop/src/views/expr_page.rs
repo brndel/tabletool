@@ -1,11 +1,9 @@
-use chrono::Utc;
 use db::{Db, DbError};
 use db_core::{
-    expr::EvalCtx,
-    query::{
+    asm_code::{AsmRuntime, compile_expr}, query::{
         Query, QueryResult, QueryResultGroupStoreExt, QueryResultStoreExt,
         QueryResultStoreTransposed,
-    },
+    }
 };
 use dioxus::prelude::*;
 use query_parse::parse_expr;
@@ -19,11 +17,15 @@ pub fn ExprPage() -> Element {
 
     let expr = text_value.with(|value| parse_expr(value));
 
-    let expr_result = expr.as_ref().map(|expr| {
-        expr.eval(&EvalCtx {
-            now: Utc::now(),
-            ..Default::default()
-        })
+    let expr_result = expr.as_ref().and_then(|expr| {
+
+        let program = compile_expr(expr, &db.tables_map()).ok()?;
+
+        let mut runtime = AsmRuntime::new(&program, Vec::new());
+
+        runtime.run();
+
+        runtime.result()
     });
 
     let query = use_memo(move || {
@@ -52,6 +54,8 @@ pub fn ExprPage() -> Element {
             placeholder: "Query/Expr",
             spellcheck: false,
             autocomplete: false,
+            cols: 80,
+            rows: 12,
             oninput: move |e| text_value.set(e.value()),
             value: "{text_value}"
         }
@@ -95,7 +99,8 @@ pub fn QueryResultView(result: Store<QueryResult>) -> Element {
             rsx! {
                 for group in groups.iter() {
                     div {
-                        "{value_to_string(group.group().read().clone(), &db)}"
+                        class: "query-result-group",
+                        h1 { "{value_to_string(group.group().read().clone(), &db)}" }
                         QueryResultView { result: group.result() }
                     }
                 }

@@ -1,8 +1,16 @@
+use chrono::DateTime;
 use chumsky::{
-    IterParser, Parser, error::Rich, extra, pratt::{infix, left, prefix}, prelude::{choice, just, recursive}, select, span::SimpleSpan
+    IterParser, Parser,
+    error::Rich,
+    extra,
+    pratt::{infix, left, prefix},
+    prelude::{choice, just, recursive},
+    select,
+    span::SimpleSpan,
 };
 use db_core::{
     expr::{BinaryOp, Expr, MathOp, UnaryOp},
+    ulid::Ulid,
     value::FieldValue,
 };
 
@@ -29,7 +37,7 @@ pub fn parser<'token, 'src: 'token>()
         .map(|((name, filter), group)| Query {
             table_name: name.into(),
             filter,
-            group_by: group
+            group_by: group,
         })
 }
 
@@ -37,17 +45,20 @@ pub fn parse_expr<'token, 'src: 'token>()
 -> impl Parser<'token, &'token [Token<'src>], Expr, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
 + Clone {
     recursive(|expr| {
-        let fn_call = select! { Token::Ident(ident) => ident }.then(
-            expr.clone()
-                .separated_by(just(Token::Separator(Separator::Comma)))
-                .collect()
-                .delimited_by(
-                    just(Token::Separator(Separator::ParenOpen)),
-                    just(Token::Separator(Separator::ParenClose)),
-                ),
-        ).map(|(name, args)| {
-            Expr::FnCall { name: name.into(), args }
-        });
+        let fn_call = select! { Token::Ident(ident) => ident }
+            .then(
+                expr.clone()
+                    .separated_by(just(Token::Separator(Separator::Comma)))
+                    .collect()
+                    .delimited_by(
+                        just(Token::Separator(Separator::ParenOpen)),
+                        just(Token::Separator(Separator::ParenClose)),
+                    ),
+            )
+            .map(|(name, args)| Expr::FnCall {
+                name: name.into(),
+                args,
+            });
 
         let num = select! {
             Token::Number(num) => num,
@@ -60,31 +71,47 @@ pub fn parse_expr<'token, 'src: 'token>()
             }
         });
 
-        let boolean = select! {
+        let special_literal = select! {
+            Token::SpecialLiteral { tag, content } => (tag, content)
+        }
+        .try_map(|(tag, content), span| match tag {
+            "id" => {
+                match content.split_once(":") {
+                    Some((table, id)) => {
+                        let id = Ulid::from_string(id).map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
+                        Ok(FieldValue::RecordId { id, table_name: table.into() })
+                    },
+                    None => Err(Rich::custom(span, format!("id literal needs format '<table name>:<id>'"))),
+                }
+            }
+            "dt" => {
+                match DateTime::parse_from_rfc3339(content) {
+                    Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
+                    Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
+                }
+            }
+            _ => Err(Rich::custom(span, format!("unkown literal tag '{tag}'"))),
+        });
+
+        let literal = select! {
             Token::Keyword(Keyword::True) => FieldValue::Bool(true),
             Token::Keyword(Keyword::False) => FieldValue::Bool(false),
-        };
-
-        let string = select! {
-            Token::StringLiteral(value) => FieldValue::Text(value.to_owned())
-        };
+            Token::StringLiteral(value) => FieldValue::Text(value.to_owned()),
+        }
+        .or(num).or(special_literal);
 
         let table_ident = select! {
             Token::Ident(ident) => Expr::TableAccess { name: ident.into() }
         };
 
-        let literal = num.or(boolean).or(string).map(Expr::Literal).or(table_ident);
+        let literal = literal.map(Expr::Literal).or(table_ident);
 
         let paren_expr = expr.delimited_by(
             just(Token::Separator(Separator::ParenOpen)),
             just(Token::Separator(Separator::ParenClose)),
         );
 
-        let atom = choice((
-            fn_call,
-            literal,
-            paren_expr
-        ));
+        let atom = choice((fn_call, literal, paren_expr));
 
         let field_access = atom.foldl(
             just(Token::Separator(Separator::Dot))

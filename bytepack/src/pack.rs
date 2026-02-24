@@ -16,6 +16,48 @@ pub trait Unpack<'b>: Sized {
     fn unpack(offset: u32, unpacker: &ByteUnpacker<'b>) -> Option<Self>;
 }
 
+// pub trait PackToBytes {
+//     const BYTE_COUNT: u32;
+//     fn to_bytes(&self) -> impl AsRef<[u8]>;
+// }
+
+// pub trait UnpackFromBytes<'b>: Sized {
+//     fn from_bytes(bytes: &'b [u8]) -> Option<Self>;
+// }
+
+// impl PackToBytes for u8 {
+//     const BYTE_COUNT: u32 = Self::BITS / 8;
+//     fn to_bytes(&self) -> impl AsRef<[u8]> {
+//         self.to_be_bytes()
+//     }
+// }
+
+// impl<'b> UnpackFromBytes<'b> for u8 {
+//     fn from_bytes(bytes: &'b [u8]) -> Option<Self> {
+//         let bytes = bytes.try_into().unwrap();
+
+//         Some(Self::from_be_bytes(bytes))
+//     }
+// }
+
+// impl<T: PackToBytes> Pack for T {
+//     const PACK_BYTES: u32 = T::BYTE_COUNT;
+//     fn pack(&self, offset: u32, packer: &mut BytePacker) {
+//         packer.pack_bytes(offset, self.to_bytes().as_ref());
+//     }
+// }
+
+// impl<'b, T: UnpackFromBytes<'b> + PackToBytes> Unpack<'b> for T {
+//     fn unpack(offset: u32, unpacker: &ByteUnpacker<'b>) -> Option<Self> {
+//         let bytes = unpacker.read_bytes(PackPointer {
+//             offset,
+//             len: Self::BYTE_COUNT,
+//         });
+
+//         Self::from_bytes(bytes)
+//     }
+// }
+
 // ---------- primitive types ----------
 
 macro_rules! num_pack {
@@ -381,7 +423,7 @@ mod tests {
     #[allow(unused)]
     struct GenericDerive<T> {
         header: u8,
-        value: T
+        value: T,
     }
 
     #[test]

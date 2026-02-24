@@ -1,13 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{Db, db::TableWithIdDef, error::DbError};
 
 use chrono::Utc;
 use db_core::{
-    expr::EvalCtx,
-    query::{Query, QueryResult, QueryResultGroup, QueryResultRecords},
-    record::RecordBytes,
-    value::{FieldValue, Value},
+    asm_code::{AsmRuntime, compile_expr}, query::{Query, QueryResult, QueryResultGroup, QueryResultRecords}, record::RecordBytes, ty::{FieldTy, Ty}, value::Value
 };
 use redb::{ReadableDatabase, ReadableTable};
 use ulid::Ulid;
@@ -23,17 +20,28 @@ impl Db {
                 table: query.table_name.clone(),
             });
         };
-        let table_data = Arc::new(table.clone());
+        let table_data = table.clone();
 
         let tx = self.inner.db.begin_read()?;
 
         let mut result_records = Vec::new();
 
-        let table_name = query.table_name.clone();
-        let mut tables_map = HashMap::from_iter([(table_name.clone(), table_data.clone())]);
-
         {
             let table = tx.open_table(TableWithIdDef::new(&query.table_name))?;
+
+            let filter_program = match &query.filter {
+                Some(filter) => {
+                    let program = compile_expr(filter, &tables.tables)
+                        .map_err(|err| DbError::ExprCompileError)?;
+
+                    if program.return_ty != Ty::Field(FieldTy::Bool) {
+                        return Err(DbError::ExprCompileError);
+                    }
+
+                    Some(program)
+                }
+                None => None,
+            };
 
             for entry in table.iter()? {
                 let (key, value) = entry?;
@@ -41,36 +49,34 @@ impl Db {
                 let id = key.value();
                 let bytes = value.value();
 
-                let record = RecordBytes::new(Ulid::from(id), bytes.to_owned());
-                let record = Arc::new(record);
+                let passes_filter = match &filter_program {
+                    Some(filter) => {
+                        let mut records = vec![None; filter.table_indices.len()];
 
-                let passes_filter = if let Some(filter) = &query.filter {
-                    let eval_ctx = EvalCtx {
-                        records: HashMap::from_iter([(table_name.clone(), record.clone())]),
-                        tables: tables_map,
-                        now,
-                    };
+                        for (table_name, idx) in &filter.table_indices {
+                            if table_name == &query.table_name {
+                                records[*idx as usize] = Some(bytes)
+                            }
+                        }
 
-                    let result = filter.eval(&eval_ctx);
+                        let records = records
+                            .into_iter()
+                            .collect::<Option<Vec<_>>>()
+                            .ok_or(DbError::ExprCompileError)?;
 
-                    drop(eval_ctx.records);
-                    tables_map = eval_ctx.tables;
+                        let mut runtime = AsmRuntime::new(filter, records);
 
-                    dbg!(&result);
+                        runtime.run();
 
-                    if let Ok(result) = result
-                        && result == Value::Field(FieldValue::Bool(true))
-                    {
-                        true
-                    } else {
-                        false
+                        runtime.result_bool()
                     }
-                } else {
-                    true
+                    None => true,
                 };
 
                 if passes_filter {
-                    result_records.push(Arc::into_inner(record).unwrap());
+                    let record = RecordBytes::new(Ulid::from(id), bytes.to_owned());
+
+                    result_records.push(record);
                 }
             }
         }
@@ -85,27 +91,32 @@ impl Db {
             Some(group_by) => {
                 let mut groups = HashMap::<Value, Vec<RecordBytes>>::new();
 
+                let program = compile_expr(group_by, &tables.tables)
+                    .map_err(|err| DbError::ExprCompileError)?;
+
                 for record in result_records {
-                    let record = Arc::new(record);
+                    let mut records = vec![None; program.table_indices.len()];
 
-                    let eval_ctx = EvalCtx {
-                        records: HashMap::from_iter([(table_name.clone(), record.clone())]),
-                        tables: tables_map,
-                        now,
-                    };
-
-                    let group_value = group_by.eval(&eval_ctx);
-
-                    drop(eval_ctx.records);
-                    tables_map = eval_ctx.tables;
-
-                    if let Ok(group) = group_value {
-                        let record = Arc::into_inner(record).unwrap();
-
-                        let entries = groups.entry(group).or_default();
-
-                        entries.push(record);
+                    for (table_name, idx) in &program.table_indices {
+                        if table_name == &query.table_name {
+                            records[*idx as usize] = Some(record.bytes())
+                        }
                     }
+
+                    let records = records
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or(DbError::ExprCompileError)?;
+
+                    let mut runtime = AsmRuntime::new(&program, records);
+
+                    runtime.run();
+
+                    let group = runtime.result().ok_or(DbError::ExprCompileError)?;
+
+                    let entries = groups.entry(group).or_default();
+
+                    entries.push(record);
                 }
 
                 return Ok(QueryResult::Grouped {
@@ -113,7 +124,10 @@ impl Db {
                         .into_iter()
                         .map(|(group_value, records)| QueryResultGroup {
                             group: group_value,
-                            result: QueryResult::Records(QueryResultRecords { records, format: table_data.clone() }),
+                            result: QueryResult::Records(QueryResultRecords {
+                                records,
+                                format: table_data.clone(),
+                            }),
                         })
                         .collect(),
                 });

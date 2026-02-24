@@ -34,3 +34,12 @@
 .query-input {
     font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
 }
+
+.query-result-group {
+    padding-top: 8pt;
+
+    h1 {
+        margin: 0;
+        border-top: 1pt solid var(--primary-color-7);
+    }
+}

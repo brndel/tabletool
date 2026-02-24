@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use db_core::{query::QueryResultRecords, record::RecordBytes};
+use db_core::{
+    query::{QueryResultRecords, QueryResultRecordsStoreExt},
+    record::RecordBytes,
+};
 use dioxus::prelude::*;
 
 use db::{Db, Ulid};
@@ -27,11 +30,16 @@ pub fn TablePage(name: String) -> Element {
     });
 
     let mut table_name = use_signal(|| name.clone());
+    use_effect({
+        use_reactive!(|name| {
+            table_name.set(name);
+        })
+    });
 
     fn query_all_records(db: &Db, name: &str) -> Option<QueryResultRecords> {
         Some(QueryResultRecords {
             records: db.get_all(name)?,
-            format: Arc::new(db.table(name)?),
+            format: db.table(name)?.clone(),
         })
     }
 
@@ -41,29 +49,19 @@ pub fn TablePage(name: String) -> Element {
     });
 
     use_effect({
-        use_reactive!(|name| {
-            table_name.set(name);
-        })
-    });
-
-    use_effect({
         let db = db.clone();
-        
+
         move || {
-            records.set(query_all_records(&db, &table_name.read()));
+            let name = table_name.read();
+
+            let result = query_all_records(&db, &name);
+            records.set(result);
         }
     });
 
-    let table_format = use_signal(|| {
-        records
-            .transpose()
-            .map(|result| result.read().format.as_ref().clone())
-    });
-
-    // let mut records = use_memo({
-    //     let db = db.clone();
-    //     move || db.get_all(&table_name()).unwrap_or_default()
-    // });
+    let table_format = records
+        .transpose()
+        .map(|records| records.format().map(|format| format.as_ref()));
 
     let update_records = {
         let db = db.clone();
@@ -125,9 +123,7 @@ pub fn TablePage(name: String) -> Element {
             flex_direction: "row",
             gap: "0.5rem",
 
-            // Button { onclick: move |_| update_records(), "Reload" }
-
-            if let Some(table_format) = table_format() {
+            if let Some(table_format) = table_format {
                 RecordDialogButton {
                     on_submit: insert_record,
                     table: table_format

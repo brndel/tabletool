@@ -13,6 +13,8 @@ pub enum DbError {
     WrongType { expected: FieldTy },
     #[error("Table {table} does not exist")]
     TableDoesNotExist { table: Arc<str> },
+    #[error("Expression compile error")]
+    ExprCompileError,
 }
 
 impl<T: Into<redb::Error>> From<T> for DbError {

@@ -43,14 +43,25 @@ pub fn lexer<'src>()
         .to_slice()
         .map(|slice| Token::Number(slice));
 
-    let string_escape = just('\\').then(choice([
-        just('\\'),
-        just('"'),
-    ])).ignored();
+    let string_escape = just('\\').then(choice([just('\\'), just('"')])).ignored();
 
-    let string_content = none_of("\\\"").ignored().or(string_escape).repeated().to_slice().map(Token::StringLiteral);
+    let string_content = none_of("\\\"")
+        .ignored()
+        .or(string_escape)
+        .repeated()
+        .to_slice()
+        .map(Token::StringLiteral);
 
     let string_literal = string_content.delimited_by(just('"'), just('"'));
+
+    let special_literal = ident()
+        .then(
+            none_of("'")
+                .repeated()
+                .to_slice()
+                .delimited_by(just('\''), just('\'')),
+        )
+        .map(|(tag, content)| Token::SpecialLiteral { tag, content });
 
     let separator = select! {
         '.' => Separator::Dot,
@@ -61,6 +72,8 @@ pub fn lexer<'src>()
     }
     .map(Token::Separator);
 
+    let raw_ident = just("r#").ignore_then(ident()).map(Token::Ident);
+
     let ident = ident().map(|ident| {
         if let Ok(keyword) = Keyword::from_str(ident) {
             Token::Keyword(keyword)
@@ -69,7 +82,9 @@ pub fn lexer<'src>()
         }
     });
 
-    let token = ident.or(op).or(num).or(string_literal).or(separator);
+    let ident = raw_ident.or(ident);
+
+    let token = choice((special_literal, ident, op, num, string_literal, separator));
 
     token.padded_by(whitespace()).repeated().collect()
 }

@@ -121,16 +121,22 @@ impl Db {
         names
     }
 
-    pub fn table(&self, name: &str) -> Option<TableData> {
+    pub fn table(&self, name: &str) -> Option<Arc<TableData>> {
         let tables = self.inner.tables.read().unwrap();
 
         tables.table(name).cloned()
+    }
+
+    pub fn tables_map(&self) -> BTreeMap<Arc<str>, Arc<TableData>> {
+        let tables = self.inner.tables.read().unwrap();
+        
+        tables.tables.clone()
     }
 }
 
 #[derive(Default)]
 pub struct DbTables {
-    pub tables: BTreeMap<Arc<str>, TableData>,
+    pub tables: BTreeMap<Arc<str>, Arc<TableData>>,
     pub indices: BTreeMap<Arc<str>, IndexDef>,
     pub triggers: BTreeMap<Arc<str>, Vec<DbTrigger>>,
 }
@@ -148,7 +154,7 @@ impl DbTables {
             println!("registering table {} with {} indices", name, ind.len());
             indices.append(&mut ind);
 
-            self.tables.insert(name, table);
+            self.tables.insert(name, Arc::new(table));
         }
 
         let mut triggers = Vec::new();
@@ -223,7 +229,7 @@ impl DbTables {
         }
     }
 
-    pub fn table<'a>(&'a self, name: &str) -> Option<&'a TableData> {
+    pub fn table<'a>(&'a self, name: &str) -> Option<&'a Arc<TableData>> {
         self.tables.get(name)
     }
 

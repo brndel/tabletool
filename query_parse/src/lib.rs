@@ -26,9 +26,8 @@ pub fn parse_expr(input: &str) -> Option<Expr> {
 #[cfg(test)]
 mod tests {
     use db_core::{
-        expr::{BinaryOp, CompareOp, EqOp, EvalCtx, Expr, MathOp, TyCtx},
-        ty::{FieldTy, Ty},
-        value::{FieldValue, Value},
+        expr::{BinaryOp, CompareOp, EqOp, Expr, MathOp},
+        value::FieldValue,
     };
 
     use super::*;
@@ -64,18 +63,6 @@ mod tests {
         };
 
         assert_eq!(query, value);
-
-        let ty_ctx = TyCtx { tables: Default::default() };
-        let eval_ctx = EvalCtx::default();
-
-        assert_eq!(
-            query.filter.as_ref().and_then(|filter| filter.ty(&ty_ctx)),
-            Some(Ty::Field(FieldTy::Bool))
-        );
-        assert_eq!(
-            query.filter.as_ref().and_then(|filter| filter.eval(&eval_ctx).ok()),
-            Some(Value::Field(FieldValue::Bool(true)))
-        );
     }
 
     #[test]

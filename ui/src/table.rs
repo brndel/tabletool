@@ -31,6 +31,7 @@ pub fn DataTable(
 
     rsx!(
         table {
+            class: "data-table",
             thead {
                 tr {
                     th {"Id"}

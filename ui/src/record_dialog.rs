@@ -32,42 +32,42 @@ pub fn RecordDialogButton(
         Vec::new()
     });
 
-    let mut input_values_effect = use_effect(move || {
-        println!("setting input_values");
-        input_values.set(
-            table()
-                .fields()
-                .map(|Named { name, value: field }| {
-                    RecordField::new(name.clone(), field.ty.clone())
-                })
-                .collect::<Vec<_>>(),
-        );
+    let mut input_values_effect = use_effect(
+        move || {
+            println!("setting input_values");
+            let fields = table()
+                    .fields()
+                    .map(|Named { name, value: field }| {
+                        RecordField::new(name.clone(), field.ty.clone())
+                    })
+                    .collect::<Vec<_>>();
+            input_values.set(fields);
     });
 
-    let mut onsubmit_button = move || {
-        let values = input_values.peek();
-        let table = table.peek();
+    let mut onsubmit_button = 
+        move || {
+            let values = input_values.peek();
 
-        let table: &TableData = &table;
+            let table: &TableData = &table.peek();
 
-        let mut packer = BytePacker::new(table.fixed_byte_count());
+            let mut packer = BytePacker::new(table.fixed_byte_count());
 
-        for field in values.iter() {
-            if let Some(value) = &field.value() {
-                if let Some(field) = table.field(&field.name) {
-                    value.pack(field.offset, &mut packer);
+            for field in values.iter() {
+                if let Some(value) = &field.value() {
+                    if let Some(field) = table.field(&field.name) {
+                        value.pack(field.offset, &mut packer);
+                    }
+                } else {
+                    warn!("field {} has no value", field.name);
+                    return;
                 }
-            } else {
-                warn!("field {} has no value", field.name);
-                return;
             }
-        }
 
-        let bytes = packer.finish();
+            let bytes = packer.finish();
 
-        on_submit(RecordBytes::create(bytes));
-        open.set(false);
-        input_values_effect.mark_dirty();
+            on_submit(RecordBytes::create(bytes));
+            open.set(false);
+            input_values_effect.mark_dirty();
     };
 
     rsx! {

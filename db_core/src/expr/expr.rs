@@ -82,7 +82,7 @@ impl Expr {
             Expr::FnCall { name, args } => match name.as_ref() {
                 "now" if args.is_empty() => Some(Ty::Field(FieldTy::Timestamp)),
                 _ => None,
-            },
+            }
         }
     }
 

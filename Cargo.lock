@@ -3004,6 +3004,7 @@ dependencies = [
 name = "query_parse"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "chumsky",
  "db_core",
  "thiserror 2.0.17",

@@ -29,6 +29,15 @@ impl BytePacker {
         }
     }
 
+    pub fn create_fields<F: PackFormat>(format: &F, create: impl Fn(&mut FieldPacker<'_, '_, F>)) -> Vec<u8> {
+        let mut packer = Self::new(format.fixed_byte_count());
+        let mut fields = packer.fields(format, 0);
+
+        create(&mut fields);
+
+        packer.finish()
+    }
+
     pub fn pack_bytes(&mut self, offset: u32, value: &[u8]) {
         pack_fixed_value(&mut self.bytes, offset, value);
     }
