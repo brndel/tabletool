@@ -1,28 +1,42 @@
+use std::sync::Arc;
+
 use db::Ulid;
 use dioxus::prelude::*;
+use dioxus_clipboard::hooks::use_clipboard;
 
 #[component]
-pub fn IdCard(id: Ulid) -> Element {
+pub fn IdCard(id: Ulid, table_name: Arc<str>) -> Element {
     let r = ((id.0 >> 0) & 0xFF) as u8;
     let g = ((id.0 >> 8) & 0xFF) as u8;
     let b = ((id.0 >> 16) & 0xFF) as u8;
 
     let color = format!("#{r:02X}{g:02X}{b:02X}");
-    let s = id_text(id);
+    let id_string = id_text(id);
+    
+    let copy_to_clipboard = {
+        let content = format!("{}:{}", table_name, id);
+        
+        move || {
+            let mut clipboard = use_clipboard();
 
-    rsx!(span {
+            clipboard.set(content.clone());
+        }
+    };
+
+    rsx!(button {
         class: "id-card",
         background_color: "{color}",
         color: if use_white_text(r, g, b) {"#ffffff"} else {"#000000"},
         title: "{id}",
-        "{s}"
+        onclick: move |_| copy_to_clipboard(),
+        "{id_string}"
     })
 }
 
 pub fn id_text(id: Ulid) -> String {
     let string = id.to_string();
 
-    let last_4 = &string[string.len()-4..string.len()];
+    let last_4 = &string[string.len() - 4..string.len()];
 
     last_4.to_owned()
 }

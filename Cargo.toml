@@ -16,6 +16,7 @@ dioxus-free-icons = { version = "0.10", features = [
     "font-awesome-regular",
     "font-awesome-solid",
 ] }
+dioxus-clipboard = "0.3"
 
 ulid = "1.2.1"
 chrono = "0.4"

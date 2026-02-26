@@ -6,8 +6,10 @@
 } */
 
 .id-card {
+    cursor: pointer;
     font-family: monospace;
     padding: 1pt 2pt;
+    border: none;
     border-radius: 2pt;
 }
 

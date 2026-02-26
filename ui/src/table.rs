@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, Local, Utc};
 use db::{Db, Ulid};
 use db_core::{
@@ -28,6 +30,8 @@ pub fn DataTable(
     let display_field_idx = records.read().format.main_display_field_idx();
 
     let db = use_context::<Db>();
+
+    let table_name_arc = Arc::<str>::from(table_name.as_str());
 
     rsx!(
         table {
@@ -79,7 +83,8 @@ pub fn DataTable(
                     tr { key: "{record.id()}",
                         td {
                             IdCard {
-                                id: record.id()
+                                id: record.id(),
+                                table_name: table_name_arc.clone()
                             }
                         }
                         for field in records.read().format.fields() {
