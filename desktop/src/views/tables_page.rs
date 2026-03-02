@@ -67,7 +67,7 @@ pub fn TablePage(name: String) -> Element {
         let db = db.clone();
 
         move || {
-            records.set(query_all_records(&db, &table_name.read()));
+            records.set(query_all_records(&db, &table_name.peek()));
             // records.set(db.get_all(&name()).unwrap_or_default());
         }
     };

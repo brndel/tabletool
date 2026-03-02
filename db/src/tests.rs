@@ -1,6 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
-use bytepack::{BytePacker, PackFormat};
+use bytepack::BytePacker;
 use db_core::{
     asm_code::{AsmRuntime, compile_expr},
     defs::table::{TableData, TableDef, TableFieldDef},
@@ -13,9 +17,10 @@ fn expr_end2end() {
 
     let expr = query_parse::parse_expr(input).unwrap();
 
-    let program = compile_expr(&expr, &BTreeMap::new()).unwrap();
+    let program = compile_expr(&expr, &BTreeMap::new(), &HashSet::new()).unwrap();
 
-    let mut runtime = AsmRuntime::new(&program, Vec::new());
+    let mut query = ();
+    let mut runtime = AsmRuntime::new(&program, Vec::new(), &mut query, []);
     runtime.run();
     let result = runtime.result_bool();
 
@@ -28,9 +33,10 @@ fn expr_math() {
 
     let expr = query_parse::parse_expr(input).unwrap();
 
-    let program = compile_expr(&expr, &BTreeMap::new()).unwrap();
+    let program = compile_expr(&expr, &BTreeMap::new(), &HashSet::new()).unwrap();
 
-    let mut runtime = AsmRuntime::new(&program, Vec::new());
+    let mut query = ();
+    let mut runtime = AsmRuntime::new(&program, Vec::new(), &mut query, []);
     runtime.run();
     let result = runtime.result_i32();
 
@@ -79,9 +85,10 @@ fn table_field_access() {
 
     let tables = BTreeMap::from_iter([("person".into(), Arc::new(table))]);
 
-    let program = compile_expr(&expr, &tables).unwrap();
+    let program = compile_expr(&expr, &tables, &HashSet::new()).unwrap();
 
-    let mut runtime = AsmRuntime::new(&program, vec![&record]);
+    let mut query = ();
+    let mut runtime = AsmRuntime::new(&program, vec![Cow::Borrowed(&record)], &mut query, []);
     runtime.run();
     let result = runtime.result_bool();
 

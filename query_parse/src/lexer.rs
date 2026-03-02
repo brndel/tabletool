@@ -5,7 +5,6 @@ use chumsky::{
     error::Rich,
     extra,
     prelude::{choice, just, none_of},
-    select,
     span::SimpleSpan,
     text::{ident, whitespace},
 };
@@ -63,13 +62,16 @@ pub fn lexer<'src>()
         )
         .map(|(tag, content)| Token::SpecialLiteral { tag, content });
 
-    let separator = select! {
-        '.' => Separator::Dot,
-        ',' => Separator::Comma,
-        ':' => Separator::Colon,
-        '(' => Separator::ParenOpen,
-        ')' => Separator::ParenClose,
-    }
+    let separator = choice([
+        just("->").to(Separator::Arrow),
+        just(".").to(Separator::Dot),
+        just(",").to(Separator::Comma),
+        just(":").to(Separator::Colon),
+        just("(").to(Separator::ParenOpen),
+        just(")").to(Separator::ParenClose),
+        just("[").to(Separator::BracketOpen),
+        just("]").to(Separator::BracketClose),
+    ])
     .map(Token::Separator);
 
     let raw_ident = just("r#").ignore_then(ident()).map(Token::Ident);
@@ -84,7 +86,7 @@ pub fn lexer<'src>()
 
     let ident = raw_ident.or(ident);
 
-    let token = choice((special_literal, ident, op, num, string_literal, separator));
+    let token = choice((special_literal, ident, separator, op, num, string_literal));
 
     token.padded_by(whitespace()).repeated().collect()
 }

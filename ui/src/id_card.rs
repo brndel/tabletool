@@ -14,12 +14,14 @@ pub fn IdCard(id: Ulid, table_name: Arc<str>) -> Element {
     let id_string = id_text(id);
     
     let copy_to_clipboard = {
-        let content = format!("{}:{}", table_name, id);
+        let content = format!("id'{}:{}'", table_name, id);
         
         move || {
             let mut clipboard = use_clipboard();
 
-            clipboard.set(content.clone());
+            if let Err(err) = clipboard.set(content.clone()) {
+                println!("clipboard err: {:?}", err);
+            }
         }
     };
 

@@ -1,41 +1,83 @@
-use std::{iter, ops::Range};
+use std::{borrow::Cow, collections::HashMap, iter, ops::Range, sync::Arc};
 
 use ulid::Ulid;
 
 use crate::{
     asm_code::{
-        asm_code::IntBits,
-        pointer::{AsmPointer, Namespace},
+        asm_code::{AccessTableIdx, IntBits},
+        pointer::{AsmPointer, AsmSlicePointer, Namespace},
         program::Program,
     },
     ty::{FieldTy, Ty},
     value::{FieldValue, Value},
 };
 
-pub struct AsmRuntime<'code, 'record> {
+pub struct AsmRuntime<'code, 'record, Q: QueryProvider> {
     instruction_pointer: usize,
     program: &'code Program,
     stack_pointer: u32,
     stack: Vec<u8>,
     heap: Vec<u8>,
-    records: Vec<&'record [u8]>,
+    query: &'record mut Q,
+    records: Vec<Cow<'record, [u8]>>,
+    record_index: HashMap<AccessTableIdx, RecordIndex>,
 }
 
-impl<'code, 'record> AsmRuntime<'code, 'record> {
-    pub fn new(program: &'code Program, records: Vec<&'record [u8]>) -> Self {
+#[derive(Default)]
+struct RecordIndex {
+    /// (record_index in AsmRuntime::records, iterator len -- 0 if its no iterator)
+    record_idx: Option<(u16, u32)>,
+    id_records: HashMap<Ulid, u16>,
+}
+
+pub trait QueryProvider {
+    fn get_record(&mut self, table_idx: AccessTableIdx, id: Ulid) -> Option<Vec<u8>>;
+}
+
+impl QueryProvider for () {
+    fn get_record(&mut self, _table_name: AccessTableIdx, _id: Ulid) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
+    pub fn new(
+        program: &'code Program,
+        records: Vec<Cow<'record, [u8]>>,
+        query: &'record mut Q,
+        record_index: impl IntoIterator<Item = (AccessTableIdx, u16, u32)>,
+    ) -> Self {
         Self {
             instruction_pointer: 0,
             program,
             stack_pointer: 0,
             stack: Vec::new(),
             heap: Vec::new(),
+            query,
             records,
+            record_index: HashMap::from_iter(record_index.into_iter().map(
+                |(table_idx, record_idx, record_iter_len)| {
+                    (
+                        table_idx,
+                        RecordIndex {
+                            record_idx: Some((record_idx, record_iter_len)),
+                            id_records: Default::default(),
+                        },
+                    )
+                },
+            )),
         }
     }
 
     pub fn run(&mut self) {
+        for (pointer, instruction) in self.program.code.iter().enumerate() {
+            println!("[{:04}] {:?}", pointer, instruction);
+        }
+        println!("----- START -----");
         while self.instruction_pointer < self.program.code.len() {
             let instruction = &self.program.code[self.instruction_pointer];
+            println!("[{:04}] {:?}", self.instruction_pointer, instruction);
+
             self.instruction_pointer += 1;
 
             instruction.exec(self);
@@ -56,7 +98,15 @@ impl<'code, 'record> AsmRuntime<'code, 'record> {
                     Some(Value::Field(FieldValue::Bool(result)))
                 }
                 FieldTy::Timestamp => todo!(),
-                FieldTy::Text => todo!(),
+                FieldTy::Text => {
+                    let result = &self.stack[0..(AsmSlicePointer::BYTES as usize)];
+                    let result_pointer = AsmSlicePointer::from_bytes(result.try_into().unwrap());
+                    let result_bytes = self.get(&result_pointer.pointer, result_pointer.len);
+
+                    let result_str = String::from_utf8_lossy(result_bytes);
+
+                    Some(Value::Field(FieldValue::Text(result_str.into_owned())))
+                }
                 FieldTy::RecordId { table_name } => {
                     let result = &self.stack[0..(IntBits::U128.bytes() as usize)];
                     let result = u128::from_be_bytes(result.try_into().unwrap());
@@ -66,7 +116,12 @@ impl<'code, 'record> AsmRuntime<'code, 'record> {
                     }))
                 }
             },
-            Ty::Table(named) => None,
+            Ty::Record(table) => Some(Value::Record {
+                table: table.clone(),
+                record: todo!(),
+            }),
+            Ty::Iterator { item_ty, kind } => None,
+            Ty::Any => None,
         }
     }
 
@@ -112,7 +167,7 @@ impl<'code, 'record> AsmRuntime<'code, 'record> {
                 &mut self.stack[range]
             }
             Namespace::Const => panic!("cannot write to const memory"),
-            Namespace::Record { idx } => panic!("cannot write to record memory"),
+            Namespace::Record { idx: _ } => panic!("cannot write to record memory"),
         };
 
         slice.copy_from_slice(value);
@@ -135,5 +190,31 @@ impl<'code, 'record> AsmRuntime<'code, 'record> {
 
     pub fn reserve_stack(&mut self, byte_count: u32) {
         self.stack.extend(iter::repeat(0).take(byte_count as usize));
+    }
+
+    pub fn query_record(&mut self, table_idx: AccessTableIdx, id: Ulid) -> Option<u16> {
+        if let Some(index) = self.record_index.get(&table_idx)
+            && let Some(index) = index.id_records.get(&id)
+        {
+            Some(*index)
+        } else {
+            let bytes = self.query.get_record(table_idx, id)?;
+            let idx = self.records.len() as u16;
+
+            self.records.push(Cow::Owned(bytes));
+
+            let index = self.record_index.entry(table_idx).or_default();
+            index.id_records.insert(id, idx);
+
+            Some(idx)
+        }
+    }
+
+    pub fn get_record_idx(&self, table_idx: AccessTableIdx) -> Option<u16> {
+        Some(self.record_index.get(&table_idx)?.record_idx?.0)
+    }
+
+    pub fn get_record_iter_info(&self, table_idx: AccessTableIdx) -> Option<(u16, u32)> {
+        self.record_index.get(&table_idx)?.record_idx
     }
 }

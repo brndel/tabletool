@@ -60,7 +60,7 @@ impl Value {
     pub fn ty(&self) -> Ty {
         match self {
             Value::Field(field_value) => Ty::Field(field_value.ty()),
-            Value::Record { table, record: _ } => Ty::Table(table.clone()),
+            Value::Record { table, record: _ } => Ty::Record(table.clone()),
         }
     }
 }

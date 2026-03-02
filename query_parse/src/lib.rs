@@ -59,7 +59,8 @@ mod tests {
         let value = Query {
             table_name: "user".into(),
             filter: Some(expr),
-            group_by: None
+            group_by: None,
+            group_extra: None
         };
 
         assert_eq!(query, value);

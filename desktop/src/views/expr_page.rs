@@ -1,9 +1,6 @@
 use db::{Db, DbError};
-use db_core::{
-    asm_code::{AsmRuntime, compile_expr}, query::{
-        Query, QueryResult, QueryResultGroupStoreExt, QueryResultStoreExt,
-        QueryResultStoreTransposed,
-    }
+use db_core::query::{
+    Query, QueryResult, QueryResultGroupStoreExt, QueryResultStoreExt, QueryResultStoreTransposed,
 };
 use dioxus::prelude::*;
 use query_parse::parse_expr;
@@ -17,16 +14,7 @@ pub fn ExprPage() -> Element {
 
     let expr = text_value.with(|value| parse_expr(value));
 
-    let expr_result = expr.as_ref().and_then(|expr| {
-
-        let program = compile_expr(expr, &db.tables_map()).ok()?;
-
-        let mut runtime = AsmRuntime::new(&program, Vec::new());
-
-        runtime.run();
-
-        runtime.result()
-    });
+    let expr_result = expr.as_ref().map(|expr| db.run_expr(expr));
 
     let query = use_memo(move || {
         println!("parsing query");
@@ -48,6 +36,15 @@ pub fn ExprPage() -> Element {
         }
     });
 
+    let query_button = |query: &'static str| {
+        rsx! {
+            button {
+            onclick: move |_| text_value.set(query.to_owned()),
+            "{query}"
+        }
+        }
+    };
+
     rsx! {
         textarea {
             class: "query-input",
@@ -59,10 +56,10 @@ pub fn ExprPage() -> Element {
             oninput: move |e| text_value.set(e.value()),
             value: "{text_value}"
         }
-        button {
-            onclick: move |_| text_value.set("query project group_by project.group".to_owned()),
-            "query project group_by project.group"
-        }
+        {query_button("query project group_by project.group")}
+        {query_button("query work_time where work_time.project->is_fun")}
+        {query_button("query work_time group_by work_time.project->group")}
+        {query_button("query project group_by project.group group_extra sum(project.priority)")}
         div {
             "Expr: {expr:?}",
         }
@@ -73,11 +70,13 @@ pub fn ExprPage() -> Element {
             "Query: {query:?}",
         }
         if let Some(result) = query_result.transpose()
-            && let Ok(result) = result.result().transpose()
         {
-            QueryResultView { result }
-        } else {
-            "Error ?!?"
+            match result.result().transpose() {
+                Ok(result) => rsx! {
+                    QueryResultView { result }
+                },
+                Err(err) => rsx! {"{err:?}"}
+            }
         }
     }
 }
@@ -101,6 +100,9 @@ pub fn QueryResultView(result: Store<QueryResult>) -> Element {
                     div {
                         class: "query-result-group",
                         h1 { "{value_to_string(group.group().read().clone(), &db)}" }
+                        if let Some(extra) = group.extra().transpose() {
+                            h2 {"{value_to_string(extra.read().clone(), &db)}"}
+                        }
                         QueryResultView { result: group.result() }
                     }
                 }

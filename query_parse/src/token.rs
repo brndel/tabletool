@@ -18,6 +18,7 @@ pub enum Keyword {
     Query,
     Where,
     GroupBy,
+    GroupExtra,
     True,
     False,
 }
@@ -30,6 +31,7 @@ impl FromStr for Keyword {
             "query" => Ok(Self::Query),
             "where" => Ok(Self::Where),
             "group_by" => Ok(Self::GroupBy),
+            "group_extra" => Ok(Self::GroupBy),
             "true" => Ok(Self::True),
             "false" => Ok(Self::False),
             _ => Err(()),
@@ -40,10 +42,13 @@ impl FromStr for Keyword {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Separator {
     Dot,
+    Arrow,
     Comma,
     Colon,
     ParenOpen,
     ParenClose,
+    BracketOpen,
+    BracketClose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

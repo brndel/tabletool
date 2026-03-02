@@ -19,5 +19,6 @@ pub struct QueryResultRecords {
 #[derive(Debug, Clone, Store)]
 pub struct QueryResultGroup {
     pub group: Value,
+    pub extra: Option<Value>,
     pub result: QueryResult,
 }

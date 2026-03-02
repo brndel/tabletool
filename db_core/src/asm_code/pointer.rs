@@ -26,7 +26,7 @@ impl From<AsmPointer> for [u8; 8] {
 
 impl From<AsmPointer> for Literal {
     fn from(value: AsmPointer) -> Self {
-        Self::B64(value.into())
+        Self::B8(value.into())
     }
 }
 
@@ -40,11 +40,15 @@ impl From<Namespace> for [u8; 4] {
 
 impl From<Namespace> for Literal {
     fn from(value: Namespace) -> Self {
-        Self::B32(value.into())
+        Self::B4(value.into())
     }
 }
 
 impl AsmPointer {
+    pub const BYTES: u32 = 8;
+    pub const OFFSET_OFFSET: u32 = 4;
+    pub const RECORD_IDX_OFFSET: u32 = 2;
+
     pub fn from_bytes(bytes: [u8; 8]) -> Self {
         let bytes: AsmPointerBytes = unsafe { transmute(bytes) };
 
@@ -73,7 +77,7 @@ impl From<AsmSlicePointer> for Literal {
 
         let result: [u8; 12] = unsafe { transmute(pointer) };
 
-        Literal::B96(result)
+        Literal::B12(result)
     }
 }
 
@@ -124,7 +128,7 @@ impl From<NamespaceBytes> for Namespace {
             1 => Namespace::Heap,
             2 => Namespace::Const,
             3 => Namespace::Record { idx: extra },
-            _ => unreachable!(),
+            i => unreachable!("invalid namespace tag {i}"),
         };
 
         namespace
@@ -175,7 +179,7 @@ mod tests {
             len: 1289763,
         };
 
-        let Literal::B96(b) = ptr.into() else {
+        let Literal::B12(b) = ptr.into() else {
             panic!()
         };
 

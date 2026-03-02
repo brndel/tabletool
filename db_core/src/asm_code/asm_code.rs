@@ -1,18 +1,20 @@
-use core::slice;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use ulid::Ulid;
 
 use crate::{
     asm_code::{
-        pointer::{AsmPointer, AsmSlicePointer},
-        runtime::AsmRuntime,
+        asm_iter::AsmIter,
+        pointer::{AsmPointer, AsmSlicePointer, Namespace},
+        runtime::{AsmRuntime, QueryProvider},
     },
     expr::{CompareOp, EqOp, LogicOp, MathOp},
 };
 
+#[derive(Debug)]
 pub enum AsmCode<Pointer = AsmPointer> {
+    Comment(&'static str),
     TestInt {
         a: Pointer,
         b: Pointer,
@@ -62,6 +64,11 @@ pub enum AsmCode<Pointer = AsmPointer> {
         target: Pointer,
         len: u32,
     },
+    CopyIndirect {
+        indirect_src: Pointer,
+        target: Pointer,
+        len: u32,
+    },
     ReserveStack {
         bytes: u32,
     },
@@ -73,7 +80,26 @@ pub enum AsmCode<Pointer = AsmPointer> {
         op: ConditionOp,
         target: usize,
     },
+    QueryRecord {
+        access_table_idx: AccessTableIdx,
+        id: Pointer,
+        offset: u32,
+        target: Pointer,
+    },
+    GetRecordPointer {
+        table_idx: AccessTableIdx,
+        offset: u32,
+        target: Pointer,
+    },
+    GetRecordIterPointer {
+        table_idx: AccessTableIdx,
+        offset: u32,
+        target: Pointer,
+    },
 }
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AccessTableIdx(pub u16);
 
 macro_rules! int_bit_match {
     ($bits:ident, ($($value:ident),*) => $expr:block) => {
@@ -108,8 +134,12 @@ macro_rules! int_bit_match {
 }
 
 impl AsmCode {
-    pub fn exec(&self, runtime: &mut AsmRuntime) {
+    pub fn exec<'code, 'record, Q: QueryProvider>(
+        &self,
+        runtime: &mut AsmRuntime<'code, 'record, Q>,
+    ) {
         match self {
+            AsmCode::Comment(_) => (),
             AsmCode::TestInt { a, b, target, bits } => {
                 let bytes = bits.bytes();
 
@@ -227,6 +257,17 @@ impl AsmCode {
                 let value = runtime.get(src, *len).to_owned(); // TODO: add runtime.copy(...)
                 runtime.set(target, &value);
             }
+            AsmCode::CopyIndirect {
+                indirect_src,
+                target,
+                len,
+            } => {
+                let src = runtime.get(indirect_src, AsmPointer::BYTES);
+                let src = AsmPointer::from_bytes(src.try_into().unwrap());
+
+                let value = runtime.get(&src, *len).to_owned(); // TODO: add runtime.copy(...)
+                runtime.set(target, &value);
+            }
             AsmCode::SetLiteralConditional {
                 test_result,
                 op,
@@ -251,6 +292,55 @@ impl AsmCode {
                     runtime.jump(*target);
                 }
             }
+            AsmCode::QueryRecord {
+                access_table_idx,
+                id,
+                offset,
+                target,
+            } => {
+                let id = runtime.get(id, IntBits::U128.bytes());
+                let id = Ulid::from_bytes(id.try_into().unwrap());
+
+                let record_idx = runtime.query_record(*access_table_idx, id).unwrap();
+
+                let pointer = AsmPointer {
+                    namespace: Namespace::Record { idx: record_idx },
+                    offset: *offset,
+                };
+
+                runtime.set(target, &<[u8; 8]>::from(pointer));
+            }
+            AsmCode::GetRecordPointer {
+                table_idx,
+                offset,
+                target,
+            } => {
+                let record_idx = runtime.get_record_idx(*table_idx).unwrap();
+
+                let pointer = AsmPointer {
+                    namespace: Namespace::Record { idx: record_idx },
+                    offset: *offset,
+                };
+
+                runtime.set(target, Literal::from(pointer).as_ref());
+            }
+            AsmCode::GetRecordIterPointer {
+                table_idx,
+                offset,
+                target,
+            } => {
+                let (record_idx, len) = runtime.get_record_iter_info(*table_idx).unwrap();
+
+                let pointer = AsmIter {
+                    current_element: AsmPointer {
+                        namespace: Namespace::Record { idx: record_idx },
+                        offset: *offset,
+                    },
+                    remaining_elements: len,
+                };
+
+                runtime.set(target, Literal::from(pointer).as_ref());
+            }
         }
     }
 
@@ -262,8 +352,8 @@ impl AsmCode {
         }
     }
 
-    fn passes_test_result(
-        runtime: &AsmRuntime,
+    fn passes_test_result<'code, 'record, Q: QueryProvider>(
+        runtime: &AsmRuntime<'code, 'record, Q>,
         test_result: &AsmPointer,
         op: &ConditionOp,
     ) -> bool {
@@ -281,6 +371,7 @@ impl AsmCode {
     }
 }
 
+#[derive(Debug)]
 pub enum IntBits {
     I8,
     I16,
@@ -306,6 +397,7 @@ impl IntBits {
     }
 }
 
+#[derive(Debug)]
 pub enum ConditionOp {
     Compare(CompareOp),
     Eq(EqOp),
@@ -324,24 +416,27 @@ impl ConditionOp {
     }
 }
 
+#[derive(Debug)]
 pub enum Literal {
-    B8([u8; 1]),
-    B16([u8; 2]),
-    B32([u8; 4]),
-    B64([u8; 8]),
-    B96([u8; 12]),
-    B128([u8; 16]),
+    B1([u8; 1]),
+    B2([u8; 2]),
+    B4([u8; 4]),
+    B8([u8; 8]),
+    B12([u8; 12]),
+    B13([u8; 13]),
+    B16([u8; 16]),
 }
 
 impl AsRef<[u8]> for Literal {
     fn as_ref(&self) -> &[u8] {
         match self {
+            Literal::B1(v) => v,
+            Literal::B2(v) => v,
+            Literal::B4(v) => v,
             Literal::B8(v) => v,
+            Literal::B12(v) => v,
+            Literal::B13(v) => v,
             Literal::B16(v) => v,
-            Literal::B32(v) => v,
-            Literal::B64(v) => v,
-            Literal::B96(v) => v,
-            Literal::B128(v) => v,
         }
     }
 }
@@ -356,23 +451,23 @@ macro_rules! impl_literal {
     };
 }
 
-impl_literal!(u8, B8);
-impl_literal!(u16, B16);
-impl_literal!(u32, B32);
-impl_literal!(u64, B64);
-impl_literal!(u128, B128);
-impl_literal!(i8, B8);
-impl_literal!(i16, B16);
-impl_literal!(i32, B32);
-impl_literal!(i64, B64);
-impl_literal!(i128, B128);
+impl_literal!(u8, B1);
+impl_literal!(u16, B2);
+impl_literal!(u32, B4);
+impl_literal!(u64, B8);
+impl_literal!(u128, B16);
+impl_literal!(i8, B1);
+impl_literal!(i16, B2);
+impl_literal!(i32, B4);
+impl_literal!(i64, B8);
+impl_literal!(i128, B16);
 
-impl_literal!(usize, B64);
-impl_literal!(isize, B64);
+impl_literal!(usize, B8);
+impl_literal!(isize, B8);
 
 impl From<bool> for Literal {
     fn from(value: bool) -> Self {
-        Self::B8(if value { [1] } else { [0] })
+        Self::B1(if value { [1] } else { [0] })
     }
 }
 

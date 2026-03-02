@@ -28,16 +28,25 @@ pub fn parser<'token, 'src: 'token>()
     let expr = parse_expr();
 
     let filter = just(Token::Keyword(Keyword::Where)).ignore_then(expr.clone());
-    let group = just(Token::Keyword(Keyword::GroupBy)).ignore_then(expr);
+    let group = just(Token::Keyword(Keyword::GroupBy)).ignore_then(expr.clone()).then(just(Token::Keyword(Keyword::GroupBy)).ignore_then(expr).or_not());
 
     just(Token::Keyword(Keyword::Query))
         .ignore_then(ident)
         .then(filter.or_not())
         .then(group.or_not())
-        .map(|((name, filter), group)| Query {
-            table_name: name.into(),
-            filter,
-            group_by: group,
+        .map(|((name, filter), group)| {
+            let (group_by, group_extra) = match group {
+                Some((group_by, Some(group_extra))) => (Some(group_by), Some(group_extra)),
+                Some((group_by, None)) => (Some(group_by), None),
+                None => (None, None),
+            };
+            
+            Query {
+                table_name: name.into(),
+                filter,
+                group_by,
+                group_extra,
+            }
         })
 }
 
@@ -75,21 +84,24 @@ pub fn parse_expr<'token, 'src: 'token>()
             Token::SpecialLiteral { tag, content } => (tag, content)
         }
         .try_map(|(tag, content), span| match tag {
-            "id" => {
-                match content.split_once(":") {
-                    Some((table, id)) => {
-                        let id = Ulid::from_string(id).map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
-                        Ok(FieldValue::RecordId { id, table_name: table.into() })
-                    },
-                    None => Err(Rich::custom(span, format!("id literal needs format '<table name>:<id>'"))),
+            "id" => match content.split_once(":") {
+                Some((table, id)) => {
+                    let id = Ulid::from_string(id)
+                        .map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
+                    Ok(FieldValue::RecordId {
+                        id,
+                        table_name: table.into(),
+                    })
                 }
-            }
-            "dt" => {
-                match DateTime::parse_from_rfc3339(content) {
-                    Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
-                    Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
-                }
-            }
+                None => Err(Rich::custom(
+                    span,
+                    format!("id literal needs format '<table name>:<id>'"),
+                )),
+            },
+            "dt" => match DateTime::parse_from_rfc3339(content) {
+                Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
+                Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
+            },
             _ => Err(Rich::custom(span, format!("unkown literal tag '{tag}'"))),
         });
 
@@ -98,7 +110,8 @@ pub fn parse_expr<'token, 'src: 'token>()
             Token::Keyword(Keyword::False) => FieldValue::Bool(false),
             Token::StringLiteral(value) => FieldValue::Text(value.to_owned()),
         }
-        .or(num).or(special_literal);
+        .or(num)
+        .or(special_literal);
 
         let table_ident = select! {
             Token::Ident(ident) => Expr::TableAccess { name: ident.into() }
@@ -106,12 +119,20 @@ pub fn parse_expr<'token, 'src: 'token>()
 
         let literal = literal.map(Expr::Literal).or(table_ident);
 
-        let paren_expr = expr.delimited_by(
+        let paren_expr = expr.clone().delimited_by(
             just(Token::Separator(Separator::ParenOpen)),
             just(Token::Separator(Separator::ParenClose)),
         );
 
-        let atom = choice((fn_call, literal, paren_expr));
+        let array_expr = expr
+            .separated_by(just(Token::Separator(Separator::Comma))).allow_trailing()
+            .collect()
+            .delimited_by(
+                just(Token::Separator(Separator::BracketOpen)),
+                just(Token::Separator(Separator::BracketClose)),
+            ).map(|exprs| Expr::Array(exprs));
+
+        let atom = choice((fn_call, literal, paren_expr, array_expr));
 
         let field_access = atom.foldl(
             just(Token::Separator(Separator::Dot))
@@ -120,6 +141,18 @@ pub fn parse_expr<'token, 'src: 'token>()
                 })
                 .repeated(),
             |value, field| Expr::FieldAccess {
+                value: Box::new(value),
+                field: field.into(),
+            },
+        );
+
+        let record_field_access = field_access.foldl(
+            just(Token::Separator(Separator::Arrow))
+                .ignore_then(select! {
+                    Token::Ident(ident) => ident
+                })
+                .repeated(),
+            |value, field| Expr::RecordFieldAccess {
                 value: Box::new(value),
                 field: field.into(),
             },
@@ -163,7 +196,7 @@ pub fn parse_expr<'token, 'src: 'token>()
             };
         }
 
-        let ops = field_access.pratt((
+        let ops = record_field_access.pratt((
             prefix(10, unary_op, |op, value, _extra| Expr::UnaryOp {
                 op,
                 value: Box::new(value),

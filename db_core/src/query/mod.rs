@@ -11,5 +11,6 @@ pub struct Query {
     pub table_name: Arc<str>,
     pub filter: Option<Expr>,
     pub group_by: Option<Expr>,
+    pub group_extra: Option<Expr>,
 }
 

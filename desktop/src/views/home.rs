@@ -82,6 +82,20 @@ pub fn Home() -> Element {
                                 has_index: false,
                             },
                         ),
+                        Named::new(
+                            "is_fun",
+                            TableFieldDef {
+                                ty: FieldTy::Bool,
+                                has_index: false,
+                            },
+                        ),
+                        Named::new(
+                            "priority",
+                            TableFieldDef {
+                                ty: FieldTy::IntI32,
+                                has_index: false,
+                            },
+                        ),
                     ]
                     .into(),
                     main_display_field: Some(0),
@@ -153,37 +167,37 @@ pub fn Home() -> Element {
                 })
             };
 
-            let create_project = |name: &str, group: &Ulid| {
+            let create_project = |name: &str, group: &Ulid, is_fun: bool, priority: i32| {
                 create_record(&db, "project", |fields| {
                     fields.pack("name", name);
                     fields.pack("group", group);
+                    fields.pack("is_fun", &is_fun);
+                    fields.pack("priority", &priority);
                 })
             };
 
-            let create_worktime = |project: &Ulid,
-                                   start_time: DateTime<Utc>,
-                                   duration: Duration,
-                                   notes: &str| {
-                create_record(&db, "work_time", |fields| {
-                    fields.pack("project", project);
-                    fields.pack("start_time", &start_time);
-                    fields.pack("end_time", &(start_time + duration));
-                    fields.pack("notes", notes);
-                })
-            };
+            let create_worktime =
+                |project: &Ulid, start_time: DateTime<Utc>, duration: Duration, notes: &str| {
+                    create_record(&db, "work_time", |fields| {
+                        fields.pack("project", project);
+                        fields.pack("start_time", &start_time);
+                        fields.pack("end_time", &(start_time + duration));
+                        fields.pack("notes", notes);
+                    })
+                };
 
             let arbeit = create_project_group("Arbeit");
             let privat = create_project_group("Privat");
             let uni = create_project_group("Uni");
 
-            let drink_manager = create_project("Getränkekasse", &arbeit);
-            let video_tracking = create_project("Videos tracken", &arbeit);
+            let drink_manager = create_project("Getränkekasse", &arbeit, true, 5);
+            let video_tracking = create_project("Videos tracken", &arbeit, false, 10);
 
-            let tabletool = create_project("TableTool", &privat);
-            let osm3d = create_project("Osm3D", &privat);
+            let tabletool = create_project("TableTool", &privat, true, 2);
+            let osm3d = create_project("Osm3D", &privat, true, 0);
 
-            let compilerdesign = create_project("Compilerdesign", &uni);
-            let ba = create_project("Bachelorarbeit", &uni);
+            let compilerdesign = create_project("Compilerdesign", &uni, true, -1);
+            let ba = create_project("Bachelorarbeit", &uni, false, 20);
 
             let now = Utc::now();
 
@@ -194,12 +208,18 @@ pub fn Home() -> Element {
                 "typst export geschrieben",
             );
 
-
             create_worktime(
                 &drink_manager,
                 now.sub(Duration::from_hours(24 + 5)),
                 Duration::from_mins(120),
                 "EntityId refactored",
+            );
+
+            create_worktime(
+                &video_tracking,
+                now.sub(Duration::from_hours(48)),
+                Duration::from_mins(120),
+                "Videos getrackt ):",
             );
 
             reload_idx.with_mut(|x| *x += 1)

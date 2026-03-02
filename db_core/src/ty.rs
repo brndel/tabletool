@@ -34,7 +34,15 @@ impl FieldTy {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Ty {
     Field(FieldTy),
-    Table(Named<Arc<TableData>>),
+    Record(Named<Arc<TableData>>),
+    Iterator { item_ty: Box<Self>, kind: IterTy },
+    Any,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum IterTy {
+    Array,
+    Record,
 }
 
 impl From<FieldTy> for Ty {
