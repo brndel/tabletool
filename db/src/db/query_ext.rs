@@ -177,7 +177,7 @@ impl Db {
 
                     runtime.run();
 
-                    let group = runtime.result().ok_or(DbError::ExprError("group value did return None"))?;
+                    let group = runtime.result().map_err(DbError::ExprPanic)?;
 
                     let entries = groups.entry(group).or_default();
 
@@ -258,6 +258,6 @@ impl Db {
 
         runtime.run();
 
-        runtime.result().ok_or(DbError::ExprError("runtime result did return None"))
+        runtime.result().map_err(DbError::ExprPanic)
     }
 }

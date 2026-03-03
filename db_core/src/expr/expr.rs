@@ -24,10 +24,6 @@ pub enum Expr {
         value: Box<Self>,
         field: Arc<str>,
     },
-    RecordFieldAccess {
-        value: Box<Self>,
-        field: Arc<str>,
-    },
     TableAccess {
         name: Arc<str>,
     },

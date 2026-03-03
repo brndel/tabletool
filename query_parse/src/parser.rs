@@ -146,18 +146,6 @@ pub fn parse_expr<'token, 'src: 'token>()
             },
         );
 
-        let record_field_access = field_access.foldl(
-            just(Token::Separator(Separator::Arrow))
-                .ignore_then(select! {
-                    Token::Ident(ident) => ident
-                })
-                .repeated(),
-            |value, field| Expr::RecordFieldAccess {
-                value: Box::new(value),
-                field: field.into(),
-            },
-        );
-
         let unary_op = select! {
             Token::Op(Op::Minus) => UnaryOp::Negate,
             Token::Op(Op::LogicNot) => UnaryOp::LogicNot,
@@ -196,7 +184,7 @@ pub fn parse_expr<'token, 'src: 'token>()
             };
         }
 
-        let ops = record_field_access.pratt((
+        let ops = field_access.pratt((
             prefix(10, unary_op, |op, value, _extra| Expr::UnaryOp {
                 op,
                 value: Box::new(value),

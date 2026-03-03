@@ -17,6 +17,8 @@ pub enum DbError {
     ExprCompileError(AsmCompileErr),
     #[error("Expression error {0}")]
     ExprError(&'static str),
+    #[error("Expression did panic")]
+    ExprPanic(String),
 }
 
 impl<T: Into<redb::Error>> From<T> for DbError {

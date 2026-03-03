@@ -86,6 +86,12 @@ pub enum AsmCode<Pointer = AsmPointer> {
         offset: u32,
         target: Pointer,
     },
+    QueryRecordIndirect {
+        access_table_idx: AccessTableIdx,
+        indirect_id: Pointer,
+        offset: u32,
+        target: Pointer,
+    },
     GetRecordPointer {
         table_idx: AccessTableIdx,
         offset: u32,
@@ -262,10 +268,7 @@ impl AsmCode {
                 target,
                 len,
             } => {
-                let src = runtime.get(indirect_src, AsmPointer::BYTES);
-                let src = AsmPointer::from_bytes(src.try_into().unwrap());
-
-                let value = runtime.get(&src, *len).to_owned(); // TODO: add runtime.copy(...)
+                let value = runtime.get_indirect(indirect_src, *len).to_owned();  // TODO: add runtime.copy(...)
                 runtime.set(target, &value);
             }
             AsmCode::SetLiteralConditional {
@@ -301,7 +304,31 @@ impl AsmCode {
                 let id = runtime.get(id, IntBits::U128.bytes());
                 let id = Ulid::from_bytes(id.try_into().unwrap());
 
-                let record_idx = runtime.query_record(*access_table_idx, id).unwrap();
+                let Some(record_idx) = runtime.query_record(*access_table_idx, id) else {
+                    runtime.panic(format!("could not get record {id}"));
+                    return;
+                };
+
+                let pointer = AsmPointer {
+                    namespace: Namespace::Record { idx: record_idx },
+                    offset: *offset,
+                };
+
+                runtime.set(target, &<[u8; 8]>::from(pointer));
+            }
+            AsmCode::QueryRecordIndirect {
+                access_table_idx,
+                indirect_id,
+                offset,
+                target,
+            } => {
+                let id = runtime.get_indirect(indirect_id, IntBits::U128.bytes());
+                let id = Ulid::from_bytes(id.try_into().unwrap());
+
+                let Some(record_idx) = runtime.query_record(*access_table_idx, id) else {
+                    runtime.panic(format!("could not get indirect record {id}"));
+                    return;
+                };
 
                 let pointer = AsmPointer {
                     namespace: Namespace::Record { idx: record_idx },
@@ -315,7 +342,12 @@ impl AsmCode {
                 offset,
                 target,
             } => {
-                let record_idx = runtime.get_record_idx(*table_idx).unwrap();
+                let Some(record_idx) = runtime.get_record_idx(*table_idx) else {
+                    runtime.panic(format!(
+                        "could not get record pointer for table_idx {table_idx:?}"
+                    ));
+                    return;
+                };
 
                 let pointer = AsmPointer {
                     namespace: Namespace::Record { idx: record_idx },
@@ -329,7 +361,12 @@ impl AsmCode {
                 offset,
                 target,
             } => {
-                let (record_idx, len) = runtime.get_record_iter_info(*table_idx).unwrap();
+                let Some((record_idx, len)) = runtime.get_record_iter_info(*table_idx) else {
+                    runtime.panic(format!(
+                        "could not get record iter pointer for table_idx {table_idx:?}"
+                    ));
+                    return;
+                };
 
                 let pointer = AsmIter {
                     current_element: AsmPointer {

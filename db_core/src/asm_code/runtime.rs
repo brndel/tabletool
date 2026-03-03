@@ -21,6 +21,7 @@ pub struct AsmRuntime<'code, 'record, Q: QueryProvider> {
     query: &'record mut Q,
     records: Vec<Cow<'record, [u8]>>,
     record_index: HashMap<AccessTableIdx, RecordIndex>,
+    panic_message: Option<String>,
 }
 
 #[derive(Default)]
@@ -66,6 +67,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
                     )
                 },
             )),
+            panic_message: None,
         }
     }
 
@@ -74,7 +76,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
             println!("[{:04}] {:?}", pointer, instruction);
         }
         println!("----- START -----");
-        while self.instruction_pointer < self.program.code.len() {
+        while self.instruction_pointer < self.program.code.len() && self.panic_message.is_none() {
             let instruction = &self.program.code[self.instruction_pointer];
             println!("[{:04}] {:?}", self.instruction_pointer, instruction);
 
@@ -84,18 +86,22 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
         }
     }
 
-    pub fn result(&self) -> Option<Value> {
+    pub fn result(self) -> Result<Value, String> {
+        if let Some(panic) = self.panic_message {
+            return Err(panic);
+        }
+
         match &self.program.return_ty {
             Ty::Field(field_ty) => match field_ty {
                 FieldTy::IntI32 => {
                     let result = &self.stack[0..(IntBits::I32.bytes() as usize)];
                     let result = i32::from_be_bytes(result.try_into().unwrap());
-                    Some(Value::Field(FieldValue::Int(result)))
+                    Ok(Value::Field(FieldValue::Int(result)))
                 }
                 FieldTy::Bool => {
                     let result = self.stack[0];
                     let result = if result == 0 { false } else { true };
-                    Some(Value::Field(FieldValue::Bool(result)))
+                    Ok(Value::Field(FieldValue::Bool(result)))
                 }
                 FieldTy::Timestamp => todo!(),
                 FieldTy::Text => {
@@ -105,23 +111,20 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
 
                     let result_str = String::from_utf8_lossy(result_bytes);
 
-                    Some(Value::Field(FieldValue::Text(result_str.into_owned())))
+                    Ok(Value::Field(FieldValue::Text(result_str.into_owned())))
                 }
                 FieldTy::RecordId { table_name } => {
                     let result = &self.stack[0..(IntBits::U128.bytes() as usize)];
                     let result = u128::from_be_bytes(result.try_into().unwrap());
-                    Some(Value::Field(FieldValue::RecordId {
+                    Ok(Value::Field(FieldValue::RecordId {
                         id: Ulid(result),
                         table_name: table_name.clone(),
                     }))
                 }
             },
-            Ty::Record(table) => Some(Value::Record {
-                table: table.clone(),
-                record: todo!(),
-            }),
-            Ty::Iterator { item_ty, kind } => None,
-            Ty::Any => None,
+            Ty::Record(table) => Err(format!("record type")),
+            Ty::Iterator { item_ty, kind } => Err(format!("iter type")),
+            Ty::Any => Err(format!("any type")),
         }
     }
 
@@ -154,6 +157,15 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
                 &self.records[idx as usize][self.get_mem_range(pointer.offset, len, false)]
             }
         }
+    }
+
+    pub fn get_indirect(&self, indirect_ptr: &AsmPointer, len: u32) -> &[u8] {
+        let ptr = self.get(indirect_ptr, AsmPointer::BYTES);
+        let ptr = AsmPointer::from_bytes(ptr.try_into().unwrap());
+
+        let value = self.get(&ptr, len);
+
+        value
     }
 
     pub fn set(&mut self, pointer: &AsmPointer, value: &[u8]) {
@@ -216,5 +228,12 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
 
     pub fn get_record_iter_info(&self, table_idx: AccessTableIdx) -> Option<(u16, u32)> {
         self.record_index.get(&table_idx)?.record_idx
+    }
+
+    pub fn panic(&mut self, message: String) {
+        if self.panic_message.is_none() {
+            println!("PANIC: '{message}'");
+            self.panic_message = Some(message);
+        }
     }
 }

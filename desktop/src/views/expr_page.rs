@@ -57,8 +57,8 @@ pub fn ExprPage() -> Element {
             value: "{text_value}"
         }
         {query_button("query project group_by project.group")}
-        {query_button("query work_time where work_time.project->is_fun")}
-        {query_button("query work_time group_by work_time.project->group")}
+        {query_button("query work_time where work_time.project.is_fun")}
+        {query_button("query work_time group_by work_time.project.group")}
         {query_button("query project group_by project.group group_extra sum(project.priority)")}
         div {
             "Expr: {expr:?}",

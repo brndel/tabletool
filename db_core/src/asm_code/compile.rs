@@ -278,7 +278,11 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         });
                         (target, Ty::Field(FieldTy::IntI32))
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy { op: op.clone(), a: a_ty, b: b_ty });
+                        return Err(AsmCompileErr::InvalidBinaryOpTy {
+                            op: op.clone(),
+                            a: a_ty,
+                            b: b_ty,
+                        });
                     }
                 }
                 BinaryOp::Logic(logic_op) => {
@@ -292,7 +296,11 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         });
                         (target, Ty::Field(FieldTy::Bool))
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy { op: op.clone(), a: a_ty, b: b_ty });
+                        return Err(AsmCompileErr::InvalidBinaryOpTy {
+                            op: op.clone(),
+                            a: a_ty,
+                            b: b_ty,
+                        });
                     }
                 }
                 BinaryOp::Compare(compare_op) => {
@@ -308,7 +316,11 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         });
                         target
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy { op: op.clone(), a: a_ty, b: b_ty });
+                        return Err(AsmCompileErr::InvalidBinaryOpTy {
+                            op: op.clone(),
+                            a: a_ty,
+                            b: b_ty,
+                        });
                     };
 
                     ctx.builder.code.push(AsmCode::SetLiteralConditional {
@@ -336,7 +348,11 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         && let Ty::Field(FieldTy::RecordId { table_name: b_name }) = &b_ty
                     {
                         if a_name != b_name {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy { op: op.clone(), a: a_ty, b: b_ty });
+                            return Err(AsmCompileErr::InvalidBinaryOpTy {
+                                op: op.clone(),
+                                a: a_ty,
+                                b: b_ty,
+                            });
                         }
 
                         let target = ctx.builder.reserve_stack(1);
@@ -356,7 +372,11 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         });
                         target
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy { op: op.clone(), a: a_ty, b: b_ty });
+                        return Err(AsmCompileErr::InvalidBinaryOpTy {
+                            op: op.clone(),
+                            a: a_ty,
+                            b: b_ty,
+                        });
                     };
 
                     ctx.builder.code.push(AsmCode::SetLiteralConditional {
@@ -382,7 +402,10 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
             let result = match op {
                 crate::expr::UnaryOp::Negate => {
                     if ty != Ty::Field(FieldTy::IntI32) {
-                        return Err(AsmCompileErr::InvalidUnaryOpTy { op: op.clone(), value: ty });
+                        return Err(AsmCompileErr::InvalidUnaryOpTy {
+                            op: op.clone(),
+                            value: ty,
+                        });
                     }
                     let bits = IntBits::I32;
                     let target = ctx.builder.reserve_stack(bits.bytes());
@@ -396,7 +419,10 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                 }
                 crate::expr::UnaryOp::LogicNot => {
                     if ty != Ty::Field(FieldTy::Bool) {
-                        return Err(AsmCompileErr::InvalidUnaryOpTy { op: op.clone(), value: ty });
+                        return Err(AsmCompileErr::InvalidUnaryOpTy {
+                            op: op.clone(),
+                            value: ty,
+                        });
                     }
                     let target = ctx.builder.reserve_stack(1);
                     ctx.builder.code.push(AsmCode::LogicNot {
@@ -410,27 +436,14 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
             Ok(result)
         }
-        Expr::FieldAccess { value, field } => {
+        Expr::FieldAccess { .. } => {
             let stack = ctx.builder.stack_pointer;
 
             let (access, ty) = compile_expr_in_field_access(expr, ctx.nest())?;
 
             match ty {
                 Ty::Field(field_ty) => {
-                    let ptr = match access.base {
-                        FieldAccessBase::AsmPointer(asm_pointer) => asm_pointer.add_offset(access.offset),
-                        FieldAccessBase::RecordAccess { table_idx } => {
-                            let target = ctx.builder.reserve_stack(AsmPointer::BYTES);
-
-                            ctx.builder.code.push(AsmCode::GetRecordPointer {
-                                table_idx,
-                                offset: access.offset,
-                                target,
-                            });
-
-                            target
-                        }
-                    };
+                    let ptr = access.to_ptr(ctx.builder);
 
                     let result = match &field_ty {
                         FieldTy::IntI32 => {
@@ -438,8 +451,8 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
                             let len = IntBits::I32.bytes();
                             let target = ctx.builder.reserve_stack(len);
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: ptr,
+                            ctx.builder.code.push(AsmCode::CopyIndirect {
+                                indirect_src: ptr,
                                 target,
                                 len,
                             });
@@ -450,8 +463,8 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                             ctx.builder.set_stack_pointer(stack);
 
                             let target = ctx.builder.reserve_stack(1);
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: ptr,
+                            ctx.builder.code.push(AsmCode::CopyIndirect {
+                                indirect_src: ptr,
                                 target,
                                 len: 1,
                             });
@@ -463,14 +476,15 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                             ctx.builder.set_stack_pointer(stack);
 
                             let target = ctx.builder.reserve_stack(AsmSlicePointer::BYTES);
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: ptr,
+                            ctx.builder.code.push(AsmCode::CopyIndirect {
+                                indirect_src: ptr,
                                 target: target.add_offset(4),
                                 len: 8,
                             });
-                            ctx.builder.code.push(AsmCode::SetLiteral {
+                            ctx.builder.code.push(AsmCode::Copy {
+                                src: ptr,
                                 target: target,
-                                value: ptr.namespace.into(),
+                                len: 4,
                             });
 
                             (target, Ty::Field(FieldTy::Text))
@@ -480,8 +494,8 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
                             let len = IntBits::U128.bytes();
                             let target = ctx.builder.reserve_stack(len);
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: ptr,
+                            ctx.builder.code.push(AsmCode::CopyIndirect {
+                                indirect_src: ptr,
                                 target,
                                 len,
                             });
@@ -524,115 +538,25 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                             },
                         ))
                     }
-                    ty => Err(AsmCompileErr::FieldAccessOnInvalidTy { ty: Ty::Iterator { item_ty, kind: IterTy::Record }}),
+                    _ => Err(AsmCompileErr::FieldAccessOnInvalidTy {
+                        ty: Ty::Iterator {
+                            item_ty,
+                            kind: IterTy::Record,
+                        },
+                    }),
                 },
                 ty => Err(AsmCompileErr::FieldAccessOnInvalidTy { ty }),
             }
         }
-        Expr::RecordFieldAccess { value, field } => {
-            let stack = ctx.builder.stack_pointer;
-
-            let (value_ptr, ty) = compile_expr_with_ctx(value, ctx.nest())?;
-
-            match ty {
-                Ty::Field(FieldTy::RecordId { table_name }) => {
-                    let table_idx = ctx.builder.access_table_idx(&table_name);
-
-                    let table = ctx.tables.get(&table_name).unwrap();
-
-                    let Some(field) = table.field(field) else {
-                        return Err(AsmCompileErr::UnkownTableField { field: field.clone(), table_name });
-                    };
-
-                    let record_pointer = ctx.builder.reserve_stack(AsmPointer::BYTES);
-                    ctx.builder.code.push(AsmCode::QueryRecord {
-                        access_table_idx: table_idx,
-                        id: value_ptr,
-                        offset: field.offset,
-                        target: record_pointer,
-                    });
-
-                    let ptr = record_pointer;
-
-                    let result = match &field.ty {
-                        FieldTy::IntI32 => {
-                            ctx.builder.set_stack_pointer(stack);
-                            let len = IntBits::I32.bytes();
-                            let target = ctx.builder.reserve_stack(len);
-                            ctx.builder.code.push(AsmCode::CopyIndirect {
-                                indirect_src: ptr,
-                                target,
-                                len,
-                            });
-
-                            (target, Ty::Field(FieldTy::IntI32))
-                        }
-                        FieldTy::Bool => {
-                            ctx.builder.set_stack_pointer(stack);
-                            let target = ctx.builder.reserve_stack(1);
-                            ctx.builder.code.push(AsmCode::CopyIndirect {
-                                indirect_src: ptr,
-                                target,
-                                len: 1,
-                            });
-
-                            (target, Ty::Field(FieldTy::Bool))
-                        }
-                        FieldTy::Timestamp => todo!(),
-                        FieldTy::Text => {
-                            let temp_pointer = ctx.builder.reserve_stack(AsmSlicePointer::BYTES);
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: ptr,
-                                target: temp_pointer,
-                                len: 4,
-                            });
-                            ctx.builder.code.push(AsmCode::CopyIndirect {
-                                indirect_src: ptr,
-                                target: temp_pointer.add_offset(4),
-                                len: 8,
-                            });
-
-                            ctx.builder.set_stack_pointer(stack);
-
-                            let target = ctx.builder.reserve_stack(AsmSlicePointer::BYTES);
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: temp_pointer,
-                                target: target,
-                                len: AsmSlicePointer::BYTES,
-                            });
-
-                            (target, Ty::Field(FieldTy::Text))
-                        }
-                        FieldTy::RecordId { table_name } => {
-                            ctx.builder.set_stack_pointer(stack);
-
-                            let len = IntBits::U128.bytes();
-                            let target = ctx.builder.reserve_stack(len);
-                            ctx.builder.code.push(AsmCode::CopyIndirect {
-                                indirect_src: ptr,
-                                target,
-                                len,
-                            });
-
-                            (
-                                target,
-                                Ty::Field(FieldTy::RecordId {
-                                    table_name: table_name.clone(),
-                                }),
-                            )
-                        }
-                    };
-
-                    Ok(result)
-                }
-                ty => Err(AsmCompileErr::FieldAccessOnInvalidTy { ty }),
-            }
-        }
-        Expr::TableAccess { name } => Err(AsmCompileErr::TableAccessWithoutField),
+        Expr::TableAccess { .. } => Err(AsmCompileErr::TableAccessWithoutField),
         Expr::FnCall { name, args } => match name.as_ref() {
             "str_len" => {
                 if args.len() != 1 {
-                    return Err(AsmCompileErr::WrongArgCount { fn_name: "str_len", expected: 1, found: args.len() });
+                    return Err(AsmCompileErr::WrongArgCount {
+                        fn_name: "str_len",
+                        expected: 1,
+                        found: args.len(),
+                    });
                 }
 
                 let arg = &args[0];
@@ -654,12 +578,19 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
                         Ok((result, Ty::Field(FieldTy::IntI32)))
                     }
-                    ty => Err(AsmCompileErr::MissmatchedTy { expected: Ty::Field(FieldTy::Text), found: ty }),
+                    ty => Err(AsmCompileErr::MissmatchedTy {
+                        expected: Ty::Field(FieldTy::Text),
+                        found: ty,
+                    }),
                 }
             }
             "sum" => {
                 if args.len() != 1 {
-                    return Err(AsmCompileErr::WrongArgCount { fn_name: "sum", expected: 1, found: args.len() });
+                    return Err(AsmCompileErr::WrongArgCount {
+                        fn_name: "sum",
+                        expected: 1,
+                        found: args.len(),
+                    });
                 }
 
                 let arg = &args[0];
@@ -793,7 +724,9 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                     ty => return Err(AsmCompileErr::SumWrongIterThiny { ty: ty }),
                 }
             }
-            fn_name => Err(AsmCompileErr::UnkownFn { fn_name: fn_name.to_owned() }),
+            fn_name => Err(AsmCompileErr::UnkownFn {
+                fn_name: fn_name.to_owned(),
+            }),
         },
     }
 }
@@ -805,7 +738,13 @@ struct FieldAccess {
 
 enum FieldAccessBase {
     AsmPointer(AsmPointer),
-    RecordAccess { table_idx: AccessTableIdx },
+    RecordAccess {
+        table_idx: AccessTableIdx,
+    },
+    QueryRecord {
+        table_idx: AccessTableIdx,
+        id: AsmPointer,
+    },
 }
 
 impl FieldAccess {
@@ -820,9 +759,44 @@ impl FieldAccess {
         self.offset += offset;
         self
     }
+
+    fn to_ptr(&self, builder: &mut CodeBuilder) -> AsmPointer {
+        match self.base {
+            FieldAccessBase::AsmPointer(asm_pointer) => {
+                let target = builder.push_stack(asm_pointer.add_offset(self.offset));
+                target
+            }
+            FieldAccessBase::RecordAccess { table_idx } => {
+                let target = builder.reserve_stack(AsmPointer::BYTES);
+
+                builder.code.push(AsmCode::GetRecordPointer {
+                    table_idx,
+                    offset: self.offset,
+                    target,
+                });
+
+                target
+            }
+            FieldAccessBase::QueryRecord { table_idx, id } => {
+                let target = builder.reserve_stack(AsmPointer::BYTES);
+
+                builder.code.push(AsmCode::QueryRecordIndirect {
+                    access_table_idx: table_idx,
+                    indirect_id: id,
+                    offset: self.offset,
+                    target,
+                });
+
+                target
+            }
+        }
+    }
 }
 
-fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Result<(FieldAccess, Ty), AsmCompileErr> {
+fn compile_expr_in_field_access(
+    expr: &Expr,
+    mut ctx: Ctx,
+) -> Result<(FieldAccess, Ty), AsmCompileErr> {
     match expr {
         Expr::FieldAccess { value, field } => {
             let (access, ty) = compile_expr_in_field_access(value, ctx.nest())?;
@@ -830,7 +804,10 @@ fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Result<(FieldAcces
             match ty {
                 Ty::Record(table) => {
                     let Some(field) = table.value.field(field) else {
-                        return Err(AsmCompileErr::UnkownTableField { field: field.clone(), table_name: table.name });
+                        return Err(AsmCompileErr::UnkownTableField {
+                            field: field.clone(),
+                            table_name: table.name,
+                        });
                     };
 
                     Ok((access.add_offset(field.offset), Ty::Field(field.ty.clone())))
@@ -838,7 +815,10 @@ fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Result<(FieldAcces
                 Ty::Iterator { item_ty, kind } => match (*item_ty, kind) {
                     (Ty::Record(table), IterTy::Record) => {
                         let Some(field) = table.value.field(field) else {
-                            return Err(AsmCompileErr::UnkownTableField { field: field.clone(), table_name: table.name });
+                            return Err(AsmCompileErr::UnkownTableField {
+                                field: field.clone(),
+                                table_name: table.name,
+                            });
                         };
 
                         Ok((
@@ -851,23 +831,30 @@ fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Result<(FieldAcces
                     }
                     _ => Err(AsmCompileErr::FieldAccessOnNoneRecordIter),
                 },
+                Ty::Field(FieldTy::RecordId { table_name }) => {
+                    let table_idx = ctx.builder.access_table_idx(&table_name);
+
+                    let table = ctx.tables.get(&table_name).unwrap();
+
+                    let Some(field) = table.field(field) else {
+                        return Err(AsmCompileErr::UnkownTableField {
+                            field: field.clone(),
+                            table_name,
+                        });
+                    };
+
+                    let ptr = access.to_ptr(ctx.builder);
+
+                    Ok((
+                        FieldAccess {
+                            offset: field.offset,
+                            base: FieldAccessBase::QueryRecord { table_idx, id: ptr },
+                        },
+                        Ty::Field(field.ty.clone()),
+                    ))
+                }
                 ty => Err(AsmCompileErr::FieldAccessOnInvalidTy { ty }),
             }
-        }
-        Expr::RecordFieldAccess { value, field } => {
-            panic!();
-            // let (access, ty) = compile_expr_in_field_access(value, ctx.nest())?;
-
-            // match ty {
-            //     Ty::Record(table) => {
-            //         let Some(field) = table.value.field(field) else {
-            //             return Err(());
-            //         };
-
-            //         Ok((access.add_offset(field.offset), Ty::Field(field.ty.clone())))
-            //     }
-            //     _ => Err(()),
-            // }
         }
         Expr::TableAccess { name } => {
             let table = ctx.tables.get(name).unwrap();
