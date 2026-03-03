@@ -64,6 +64,7 @@ struct CodeBuilder {
     access_table_indices: Vec<Arc<str>>,
     stack_pointer: u32,
     max_stack_pointer: u32,
+    jump_labels: Vec<usize>,
 }
 
 impl CodeBuilder {
@@ -149,6 +150,16 @@ impl CodeBuilder {
                 bytes: self.max_stack_pointer,
             },
         );
+
+        for code in &mut self.code {
+            match code {
+                AsmCode::Jump { target } | AsmCode::JumpConditional { target, .. } => {
+                    *target = self.jump_labels.get(*target).cloned().unwrap_or_default();
+                }
+                _ => (),
+            }
+        }
+
         Program {
             const_memory: self.const_memory,
             code: self.code,
@@ -156,6 +167,24 @@ impl CodeBuilder {
             access_table_indices: self.access_table_indices,
             return_ty,
         }
+    }
+
+    pub fn reserve_jump_label(&mut self) -> usize {
+        let label = self.jump_labels.len();
+
+        self.jump_labels.push(0);
+
+        label
+    }
+
+    /// Sets the given jump label to the last added instruction
+    pub fn set_jump_label_prev(&mut self, label: usize) {
+        self.jump_labels[label] = self.code.len()
+    }
+
+    /// Sets the given jump label to the next instruction which will be added
+    pub fn set_jump_label_next(&mut self, label: usize) {
+        self.jump_labels[label] = self.code.len() + 1
     }
 }
 
@@ -613,7 +642,10 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                                 ctx.builder.reserve_stack(IntBits::U32.bytes());
                             let current_value_ptr = ctx.builder.reserve_stack(IntBits::I32.bytes());
 
-                            let loop_check_point = ctx.builder.code.len() + 1;
+                            let loop_check_label = ctx.builder.reserve_jump_label();
+                            let loop_end_label = ctx.builder.reserve_jump_label();
+
+                            ctx.builder.set_jump_label_next(loop_check_label);
 
                             ctx.builder.code.push(AsmCode::TestInt {
                                 a: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
@@ -622,30 +654,28 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                                 bits: IntBits::U32,
                             });
 
+                            ctx.builder.code.push(AsmCode::JumpConditional {
+                                test_result: compare_result_ptr,
+                                op: super::asm_code::ConditionOp::Eq(crate::expr::EqOp::Eq),
+                                target: loop_end_label,
+                            });
+
+                            ctx.builder.code.push(AsmCode::CopyIndirect {
+                                indirect_src: iter_ptr.add_offset(AsmIter::CURRENT_ELEM_PTR_OFFSET),
+                                target: current_value_ptr,
+                                len: IntBits::I32.bytes(),
+                            });
+
+                            ctx.builder.code.push(AsmCode::MathOp {
+                                a: result_ptr,
+                                b: current_value_ptr,
+                                op: MathOp::Add,
+                                target: result_ptr,
+                                bits: IntBits::I32,
+                            });
+
                             match kind {
                                 IterTy::Array => {
-                                    let loop_end_point = ctx.builder.code.len() + 7;
-
-                                    ctx.builder.code.push(AsmCode::JumpConditional {
-                                        test_result: compare_result_ptr,
-                                        op: super::asm_code::ConditionOp::Eq(crate::expr::EqOp::Eq),
-                                        target: loop_end_point,
-                                    });
-
-                                    ctx.builder.code.push(AsmCode::CopyIndirect {
-                                        indirect_src: iter_ptr
-                                            .add_offset(AsmIter::CURRENT_ELEM_PTR_OFFSET),
-                                        target: current_value_ptr,
-                                        len: IntBits::I32.bytes(),
-                                    });
-                                    ctx.builder.code.push(AsmCode::MathOp {
-                                        a: result_ptr,
-                                        b: current_value_ptr,
-                                        op: MathOp::Add,
-                                        target: result_ptr,
-                                        bits: IntBits::I32,
-                                    });
-
                                     let iter_offset_ptr = iter_ptr.add_offset(
                                         AsmIter::CURRENT_ELEM_PTR_OFFSET
                                             + AsmPointer::OFFSET_OFFSET,
@@ -657,38 +687,8 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                                         target: iter_offset_ptr,
                                         bits: IntBits::U32,
                                     });
-
-                                    ctx.builder.code.push(AsmCode::MathOp {
-                                        a: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
-                                        b: one_ptr,
-                                        op: MathOp::Sub,
-                                        target: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
-                                        bits: IntBits::U32,
-                                    });
                                 }
                                 IterTy::Record => {
-                                    let loop_end_point = ctx.builder.code.len() + 7;
-
-                                    ctx.builder.code.push(AsmCode::JumpConditional {
-                                        test_result: compare_result_ptr,
-                                        op: super::asm_code::ConditionOp::Eq(crate::expr::EqOp::Eq),
-                                        target: loop_end_point,
-                                    });
-
-                                    ctx.builder.code.push(AsmCode::CopyIndirect {
-                                        indirect_src: iter_ptr
-                                            .add_offset(AsmIter::CURRENT_ELEM_PTR_OFFSET),
-                                        target: current_value_ptr,
-                                        len: IntBits::I32.bytes(),
-                                    });
-                                    ctx.builder.code.push(AsmCode::MathOp {
-                                        a: result_ptr,
-                                        b: current_value_ptr,
-                                        op: MathOp::Add,
-                                        target: result_ptr,
-                                        bits: IntBits::I32,
-                                    });
-
                                     let iter_record_idx_ptr = iter_ptr.add_offset(
                                         AsmIter::CURRENT_ELEM_PTR_OFFSET
                                             + AsmPointer::RECORD_IDX_OFFSET,
@@ -700,20 +700,22 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                                         target: iter_record_idx_ptr,
                                         bits: IntBits::U16,
                                     });
-
-                                    ctx.builder.code.push(AsmCode::MathOp {
-                                        a: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
-                                        b: one_ptr,
-                                        op: MathOp::Sub,
-                                        target: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
-                                        bits: IntBits::U32,
-                                    });
                                 }
                             }
+                            
+                            ctx.builder.code.push(AsmCode::MathOp {
+                                a: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
+                                b: one_ptr,
+                                op: MathOp::Sub,
+                                target: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
+                                bits: IntBits::U32,
+                            });
 
                             ctx.builder.code.push(AsmCode::Jump {
-                                target: loop_check_point,
+                                target: loop_check_label,
                             });
+
+                            ctx.builder.set_jump_label_next(loop_end_label);
 
                             ctx.builder.set_stack_pointer(stack);
 
