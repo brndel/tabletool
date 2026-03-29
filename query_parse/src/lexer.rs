@@ -8,12 +8,12 @@ use chumsky::{
     span::SimpleSpan,
     text::{ident, whitespace},
 };
-use db_core::expr::{CompareOp, EqOp, LogicOp};
+use db_core::expr::{CompareOp, EqOp, LogicOp, Spanned};
 
-use crate::token::{Keyword, Op, Separator, Token};
+use crate::{token::{Keyword, Op, Separator, Token}};
 
 pub fn lexer<'src>()
--> impl Parser<'src, &'src str, Vec<Token<'src>>, extra::Err<Rich<'src, char, SimpleSpan>>> {
+-> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char, SimpleSpan>>> {
     let op = choice([
         just("==").to(Op::Eq(EqOp::Eq)),
         just("!=").to(Op::Eq(EqOp::Neq)),
@@ -28,9 +28,21 @@ pub fn lexer<'src>()
         just("!").to(Op::LogicNot),
         just("&&").to(Op::Logic(LogicOp::And)),
         just("||").to(Op::Logic(LogicOp::Or)),
-    ]);
+    ]).map(|op| Token::Op(op));
 
-    let op = op.map(Token::Op);
+    let separator = choice([
+        just("->").to(Separator::Arrow),
+        just(".").to(Separator::Dot),
+        just(",").to(Separator::Comma),
+        just(":").to(Separator::Colon),
+        just("(").to(Separator::ParenOpen),
+        just(")").to(Separator::ParenClose),
+        just("[").to(Separator::BracketOpen),
+        just("]").to(Separator::BracketClose),
+        just("{").to(Separator::BraceOpen),
+        just("}").to(Separator::BraceClose),
+    ])
+    .map(|op| Token::Separator(op));
 
     // Num with float is currently not supported, because db currently does not have f32/f64 data types
     // let num = chumsky::text::digits(10)
@@ -49,7 +61,7 @@ pub fn lexer<'src>()
         .or(string_escape)
         .repeated()
         .to_slice()
-        .map(Token::StringLiteral);
+        .map(|s| Token::StringLiteral(s));
 
     let string_literal = string_content.delimited_by(just('"'), just('"'));
 
@@ -61,18 +73,6 @@ pub fn lexer<'src>()
                 .delimited_by(just('\''), just('\'')),
         )
         .map(|(tag, content)| Token::SpecialLiteral { tag, content });
-
-    let separator = choice([
-        just("->").to(Separator::Arrow),
-        just(".").to(Separator::Dot),
-        just(",").to(Separator::Comma),
-        just(":").to(Separator::Colon),
-        just("(").to(Separator::ParenOpen),
-        just(")").to(Separator::ParenClose),
-        just("[").to(Separator::BracketOpen),
-        just("]").to(Separator::BracketClose),
-    ])
-    .map(Token::Separator);
 
     let raw_ident = just("r#").ignore_then(ident()).map(Token::Ident);
 
@@ -86,7 +86,7 @@ pub fn lexer<'src>()
 
     let ident = raw_ident.or(ident);
 
-    let token = choice((special_literal, ident, separator, op, num, string_literal));
+    let token = choice((op, separator, special_literal, ident, num, string_literal)).map_with(|token, extra| Spanned::new(extra.span(), token));
 
     token.padded_by(whitespace()).repeated().collect()
 }

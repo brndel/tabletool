@@ -72,18 +72,19 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
     }
 
     pub fn run(&mut self) {
-        for (pointer, instruction) in self.program.code.iter().enumerate() {
-            println!("[{:04}] {:?}", pointer, instruction);
-        }
-        println!("----- START -----");
+        // for (pointer, instruction) in self.program.code.iter().enumerate() {
+        //     println!("[{:04}] {:?}", pointer, instruction);
+        // }
+        // println!("----- START -----");
         while self.instruction_pointer < self.program.code.len() && self.panic_message.is_none() {
             let instruction = &self.program.code[self.instruction_pointer];
-            println!("[{:04}] {:?}", self.instruction_pointer, instruction);
+            // println!("[{:04}] {:?}", self.instruction_pointer, instruction);
 
             self.instruction_pointer += 1;
 
             instruction.exec(self);
         }
+        // println!("----- DONE -----");
     }
 
     pub fn result(self) -> Result<Value, String> {
@@ -123,6 +124,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
                 }
             },
             Ty::Record(table) => Err(format!("record type")),
+            Ty::Struct(table) => Err(format!("struct type")),
             Ty::Iterator { item_ty, kind } => Err(format!("iter type")),
             Ty::Any => Err(format!("any type")),
         }

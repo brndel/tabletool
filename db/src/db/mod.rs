@@ -26,6 +26,7 @@ pub struct DbInner {
     tables: RwLock<DbTables>,
 }
 
+pub use query_ext::CompiledQuery;
 
 type TableWithIdDef<'a> = TableDefinition<'a, u128, &'static [u8]>;
 

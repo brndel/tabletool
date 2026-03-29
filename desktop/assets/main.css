@@ -33,10 +33,6 @@
     background-color: var(--primary-color-4);
 }
 
-.query-input {
-    font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
-}
-
 .query-result-group {
     padding-top: 8pt;
 
@@ -44,4 +40,23 @@
         margin: 0;
         border-top: 1pt solid var(--primary-color-7);
     }
+}
+
+
+.query-input {
+    font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
+    background-color: var(--primary-color-4);
+    color: var(--secondary-color);
+    margin: 16pt;
+    padding: 8pt;
+    border-radius: 8pt;
+    border: solid 2pt var(--primary-color-6);
+}
+
+::highlight(text-code-marker) {
+    color: orange;
+}
+
+#dxp-panes-left {
+    height: 100pt;
 }

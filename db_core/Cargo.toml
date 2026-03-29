@@ -9,3 +9,5 @@ bytepack.workspace = true
 ulid.workspace = true
 chrono.workspace = true
 dioxus-stores.workspace = true
+
+chumsky.workspace = true

@@ -1,11 +1,11 @@
-
+mod views;
+mod code_editor;
 
 use dioxus::prelude::*;
 
 use ui::Navbar;
 use views::{Info, Home, TablePage, ViewsPage, ExprPage};
 
-mod views;
 
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]

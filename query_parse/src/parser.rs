@@ -3,13 +3,15 @@ use chumsky::{
     IterParser, Parser,
     error::Rich,
     extra,
+    input::{SliceInput, ValueInput},
     pratt::{infix, left, prefix},
     prelude::{choice, just, recursive},
     select,
     span::SimpleSpan,
 };
 use db_core::{
-    expr::{BinaryOp, Expr, MathOp, UnaryOp},
+    expr::{BinaryOp, Expr, MathOp, Spanned, UnaryOp},
+    named::Named,
     ulid::Ulid,
     value::FieldValue,
 };
@@ -18,17 +20,25 @@ use db_core::query::Query;
 
 use crate::token::{Keyword, Op, Separator, Token};
 
-pub fn parser<'token, 'src: 'token>()
--> impl Parser<'token, &'token [Token<'src>], Query, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
+pub fn parser<'token, 'src: 'token, I>()
+-> impl Parser<'token, I, Query, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
+where
+    I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
 {
     let ident = select! {
-        Token::Ident(ident) => ident
+        Token::Ident(ident) = e => Spanned::new(e.span(), ident)
     };
 
     let expr = parse_expr();
 
     let filter = just(Token::Keyword(Keyword::Where)).ignore_then(expr.clone());
-    let group = just(Token::Keyword(Keyword::GroupBy)).ignore_then(expr.clone()).then(just(Token::Keyword(Keyword::GroupBy)).ignore_then(expr).or_not());
+    let group = just(Token::Keyword(Keyword::GroupBy))
+        .ignore_then(expr.clone())
+        .then(
+            just(Token::Keyword(Keyword::GroupBy))
+                .ignore_then(expr)
+                .or_not(),
+        );
 
     just(Token::Keyword(Keyword::Query))
         .ignore_then(ident)
@@ -40,9 +50,9 @@ pub fn parser<'token, 'src: 'token>()
                 Some((group_by, None)) => (Some(group_by), None),
                 None => (None, None),
             };
-            
+
             Query {
-                table_name: name.into(),
+                table_name: name.map(Into::into),
                 filter,
                 group_by,
                 group_extra,
@@ -50,145 +60,189 @@ pub fn parser<'token, 'src: 'token>()
         })
 }
 
-pub fn parse_expr<'token, 'src: 'token>()
--> impl Parser<'token, &'token [Token<'src>], Expr, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
-+ Clone {
+pub fn parse_expr<'token, 'src: 'token, I>()
+-> impl Parser<'token, I, Spanned<Expr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone
+where
+    I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
+{
     recursive(|expr| {
-        let fn_call = select! { Token::Ident(ident) => ident }
-            .then(
-                expr.clone()
-                    .separated_by(just(Token::Separator(Separator::Comma)))
-                    .collect()
-                    .delimited_by(
-                        just(Token::Separator(Separator::ParenOpen)),
-                        just(Token::Separator(Separator::ParenClose)),
-                    ),
-            )
-            .map(|(name, args)| Expr::FnCall {
-                name: name.into(),
-                args,
-            });
+        // let fn_call = select! { Token::Ident(ident) = e => Spanned::new(e.span(), ident.into()) }
+        //     .then(
+        //         expr.clone()
+        //             .map_with(|expr, extra| Spanned::new(extra.span(), expr))
+        //             .separated_by(just(Token::Separator(Separator::Comma)))
+        //             .collect()
+        //             .delimited_by(
+        //                 just(Token::Separator(Separator::ParenOpen)),
+        //                 just(Token::Separator(Separator::ParenClose)),
+        //             ),
+        //     )
+        //     .map(|(name, args)| Expr::FnCall { name, args });
 
-        let num = select! {
-            Token::Number(num) => num,
-        }
-        .try_map(|num, span| {
-            if let Ok(value) = num.parse() {
-                Ok(FieldValue::Int(value))
-            } else {
-                Err(Rich::custom(span, "Invalid integer"))
-            }
-        });
+        // let num = select! {
+        //     Token::Number(num) => num,
+        // }
+        // .try_map(|num, span| {
+        //     if let Ok(value) = num.parse() {
+        //         Ok(FieldValue::Int(value))
+        //     } else {
+        //         Err(Rich::custom(span, "Invalid integer"))
+        //     }
+        // });
 
-        let special_literal = select! {
-            Token::SpecialLiteral { tag, content } => (tag, content)
-        }
-        .try_map(|(tag, content), span| match tag {
-            "id" => match content.split_once(":") {
-                Some((table, id)) => {
-                    let id = Ulid::from_string(id)
-                        .map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
-                    Ok(FieldValue::RecordId {
-                        id,
-                        table_name: table.into(),
-                    })
-                }
-                None => Err(Rich::custom(
-                    span,
-                    format!("id literal needs format '<table name>:<id>'"),
-                )),
-            },
-            "dt" => match DateTime::parse_from_rfc3339(content) {
-                Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
-                Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
-            },
-            _ => Err(Rich::custom(span, format!("unkown literal tag '{tag}'"))),
-        });
+        // let special_literal = select! {
+        //     Token::SpecialLiteral { tag, content } => (tag, content)
+        // }
+        // .try_map(|(tag, content), span| match tag {
+        //     "id" => match content.split_once(":") {
+        //         Some((table, id)) => {
+        //             let id = Ulid::from_string(id)
+        //                 .map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
+        //             Ok(FieldValue::RecordId {
+        //                 id,
+        //                 table_name: table.into(),
+        //             })
+        //         }
+        //         None => Err(Rich::custom(
+        //             span,
+        //             format!("id literal needs format '<table name>:<id>'"),
+        //         )),
+        //     },
+        //     "dt" => match DateTime::parse_from_rfc3339(content) {
+        //         Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
+        //         Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
+        //     },
+        //     _ => Err(Rich::custom(span, format!("unkown literal tag '{tag}'"))),
+        // });
 
-        let literal = select! {
-            Token::Keyword(Keyword::True) => FieldValue::Bool(true),
-            Token::Keyword(Keyword::False) => FieldValue::Bool(false),
-            Token::StringLiteral(value) => FieldValue::Text(value.to_owned()),
-        }
-        .or(num)
-        .or(special_literal);
+        // let literal = select! {
+        //     Token::Keyword(Keyword::True) => FieldValue::Bool(true),
+        //     Token::Keyword(Keyword::False) => FieldValue::Bool(false),
+        //     Token::StringLiteral(value) => FieldValue::Text(value.to_owned()),
+        // }
+        // .or(num)
+        // .or(special_literal)
+        // .map_with(|literal, extra| Expr::Literal(Spanned::new(extra.span(), literal)));
 
-        let table_ident = select! {
-            Token::Ident(ident) => Expr::TableAccess { name: ident.into() }
-        };
+        // let table_ident = select! {
+        //     Token::Ident(ident) = e => Expr::TableAccess { name: Spanned::new(e.span(), ident.into()) }
+        // };
 
-        let literal = literal.map(Expr::Literal).or(table_ident);
+        // let paren_expr = expr.clone().delimited_by(
+        //     just(Token::Separator(Separator::ParenOpen)),
+        //     just(Token::Separator(Separator::ParenClose)),
+        // );
 
-        let paren_expr = expr.clone().delimited_by(
-            just(Token::Separator(Separator::ParenOpen)),
-            just(Token::Separator(Separator::ParenClose)),
-        );
+        // let array_expr = expr
+        //     .clone()
+        //     .map_with(|expr, extra| Spanned::new(extra.span(), expr))
+        //     .separated_by(just(Token::Separator(Separator::Comma)))
+        //     .allow_trailing()
+        //     .collect()
+        //     .delimited_by(
+        //         just(Token::Separator(Separator::BracketOpen)),
+        //         just(Token::Separator(Separator::BracketClose)),
+        //     )
+        //     .map(|exprs| Expr::Array(exprs));
 
-        let array_expr = expr
-            .separated_by(just(Token::Separator(Separator::Comma))).allow_trailing()
-            .collect()
-            .delimited_by(
-                just(Token::Separator(Separator::BracketOpen)),
-                just(Token::Separator(Separator::BracketClose)),
-            ).map(|exprs| Expr::Array(exprs));
+        // let ident = select! {Token::Ident(s) => s};
 
-        let atom = choice((fn_call, literal, paren_expr, array_expr));
+        // let struct_expr = ident
+        //     .then_ignore(just(Token::Separator(Separator::Colon)))
+        //     .then(expr.clone())
+        //     .map_with(|(name, value), extra| Spanned::new(extra.span(), Named::new(name, value)))
+        //     .separated_by(just(Token::Separator(Separator::Comma)))
+        //     .allow_trailing()
+        //     .collect()
+        //     .delimited_by(
+        //         just(Token::Separator(Separator::BraceOpen)),
+        //         just(Token::Separator(Separator::BraceClose)),
+        //     )
+        //     .map(|fields| Expr::Struct { fields });
 
-        let field_access = atom.foldl(
+        // let atom = choice((
+        //     fn_call,
+        //     literal,
+        //     table_ident,
+        //     paren_expr,
+        //     array_expr,
+        //     struct_expr,
+        // ));
+
+        let atom = parse_atom(expr);
+
+        let field_access = atom.foldl_with(
             just(Token::Separator(Separator::Dot))
-                .ignore_then(select! {
-                    Token::Ident(ident) => ident
-                })
+                .to_span()
+                .then(
+                    select! {
+                        Token::Ident(ident) = e => Spanned::new(e.span(), ident.into())
+                    }
+                    .or_not(),
+                )
                 .repeated(),
-            |value, field| Expr::FieldAccess {
-                value: Box::new(value),
-                field: field.into(),
+            |value, (dot_span, field), extra| {
+                Spanned::new(
+                    extra.span(),
+                    Expr::FieldAccess {
+                        value: value.map(Box::new),
+                        dot_span,
+                        field: field,
+                    },
+                )
             },
         );
+
+        // return field_access;
 
         let unary_op = select! {
-            Token::Op(Op::Minus) => UnaryOp::Negate,
-            Token::Op(Op::LogicNot) => UnaryOp::LogicNot,
+            Token::Op(Op::Minus) = e => Spanned::new(e.span(), UnaryOp::Negate),
+            Token::Op(Op::LogicNot) = e => Spanned::new(e.span(), UnaryOp::LogicNot),
         };
 
         let product_op = select! {
-            Token::Op(Op::Mul) => BinaryOp::Math(MathOp::Mul),
-            Token::Op(Op::Div) => BinaryOp::Math(MathOp::Div),
+            Token::Op(Op::Mul) = e => Spanned::new(e.span(), BinaryOp::Math(MathOp::Mul)),
+            Token::Op(Op::Div) = e => Spanned::new(e.span(), BinaryOp::Math(MathOp::Div)),
         };
 
         let sum_op = select! {
-            Token::Op(Op::Plus) => BinaryOp::Math(MathOp::Add),
-            Token::Op(Op::Minus) => BinaryOp::Math(MathOp::Sub),
+            Token::Op(Op::Plus) = e => Spanned::new(e.span(), BinaryOp::Math(MathOp::Add)),
+            Token::Op(Op::Minus) = e => Spanned::new(e.span(), BinaryOp::Math(MathOp::Sub)),
         };
 
         let compare_op = select! {
-            Token::Op(Op::Compare(op)) => BinaryOp::Compare(op),
+            Token::Op(Op::Compare(op)) = e => Spanned::new(e.span(), BinaryOp::Compare(op)),
         };
 
         let logic_op = select! {
-            Token::Op(Op::Logic(op)) => BinaryOp::Logic(op),
+            Token::Op(Op::Logic(op)) = e => Spanned::new(e.span(), BinaryOp::Logic(op)),
         };
 
         let eq_op = select! {
-            Token::Op(Op::Eq(op)) => BinaryOp::Eq(op),
+            Token::Op(Op::Eq(op)) = e => Spanned::new(e.span(), BinaryOp::Eq(op)),
         };
 
         // A lambda function does not work here because "implementation of `Fn` is not general enough"
         macro_rules! binary_fold {
             () => {
-                |a, op, b, _extra| Expr::BinaryOp {
-                    a: Box::new(a),
-                    op,
-                    b: Box::new(b),
+                |a: Spanned<Expr>, op: Spanned<BinaryOp>, b: Spanned<Expr>, extra| {
+                    Spanned::new(
+                        extra.span(),
+                        Expr::BinaryOp {
+                            a: Spanned::map(a, Box::new),
+                            op,
+                            b: Spanned::map(b, Box::new),
+                        },
+                    )
                 }
             };
         }
 
         let ops = field_access.pratt((
-            prefix(10, unary_op, |op, value, _extra| Expr::UnaryOp {
+            prefix(10, unary_op, |op: Spanned<UnaryOp>, value: Spanned<Expr>, extra| Spanned::new(extra.span(), Expr::UnaryOp {
                 op,
-                value: Box::new(value),
-            }),
+                value: value.map(Box::new),
+            })),
             infix(left(9), product_op, binary_fold!()),
             infix(left(8), sum_op, binary_fold!()),
             infix(left(7), compare_op, binary_fold!()),
@@ -198,4 +252,120 @@ pub fn parse_expr<'token, 'src: 'token>()
 
         ops
     })
+}
+
+fn parse_atom<'token, 'src: 'token, I, E>(
+    expr: E,
+) -> impl Parser<'token, I, Spanned<Expr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone
+where
+    I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
+    E: Parser<'token, I, Spanned<Expr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone,
+{
+    let fn_call = select! { Token::Ident(ident) = e => Spanned::new(e.span(), ident.into()) }
+        .then(
+            expr.clone()
+                .separated_by(just(Token::Separator(Separator::Comma)))
+                .collect()
+                .delimited_by(
+                    just(Token::Separator(Separator::ParenOpen)),
+                    just(Token::Separator(Separator::ParenClose)),
+                ),
+        )
+        .map_with(|(name, args), extra| Spanned::new(extra.span(), Expr::FnCall { name, args }));
+
+    let num = select! {
+        Token::Number(num) => num,
+    }
+    .try_map(|num, span| {
+        if let Ok(value) = num.parse() {
+            Ok(FieldValue::Int(value))
+        } else {
+            Err(Rich::custom(span, "Invalid integer"))
+        }
+    });
+
+    let special_literal = select! {
+        Token::SpecialLiteral { tag, content } => (tag, content)
+    }
+    .try_map(|(tag, content), span| match tag {
+        "id" => match content.split_once(":") {
+            Some((table, id)) => {
+                let id = Ulid::from_string(id)
+                    .map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
+                Ok(FieldValue::RecordId {
+                    id,
+                    table_name: table.into(),
+                })
+            }
+            None => Err(Rich::custom(
+                span,
+                format!("id literal needs format '<table name>:<id>'"),
+            )),
+        },
+        "dt" => match DateTime::parse_from_rfc3339(content) {
+            Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
+            Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
+        },
+        _ => Err(Rich::custom(span, format!("unkown literal tag '{tag}'"))),
+    });
+
+    let literal = select! {
+        Token::Keyword(Keyword::True) => FieldValue::Bool(true),
+        Token::Keyword(Keyword::False) => FieldValue::Bool(false),
+        Token::StringLiteral(value) => FieldValue::Text(value.to_owned()),
+    }
+    .or(num)
+    .or(special_literal)
+    .map_with(|literal, extra| {
+        Spanned::new(
+            extra.span(),
+            Expr::Literal(Spanned::new(extra.span(), literal)),
+        )
+    });
+
+    let table_ident = select! {
+        Token::Ident(ident) = e => Spanned::new(e.span(), Expr::TableAccess { name: Spanned::new(e.span(), ident.into()) })
+    };
+
+    let paren_expr = expr.clone().delimited_by(
+        just(Token::Separator(Separator::ParenOpen)),
+        just(Token::Separator(Separator::ParenClose)),
+    );
+
+    let array_expr = expr
+        .clone()
+        .separated_by(just(Token::Separator(Separator::Comma)))
+        .allow_trailing()
+        .collect()
+        .delimited_by(
+            just(Token::Separator(Separator::BracketOpen)),
+            just(Token::Separator(Separator::BracketClose)),
+        )
+        .map_with(|exprs, extra| Spanned::new(extra.span(), Expr::Array(exprs)));
+
+    let ident = select! {Token::Ident(s) => s};
+
+    let struct_expr = ident
+        .then_ignore(just(Token::Separator(Separator::Colon)))
+        .then(expr.clone())
+        .map(|(name, value)| value.map(|value| Named::new(name, value)))
+        .separated_by(just(Token::Separator(Separator::Comma)))
+        .allow_trailing()
+        .collect()
+        .delimited_by(
+            just(Token::Separator(Separator::BraceOpen)),
+            just(Token::Separator(Separator::BraceClose)),
+        )
+        .map_with(|fields, extra| Spanned::new(extra.span(), Expr::Struct { fields }));
+
+    let atom = choice((
+        fn_call,
+        literal,
+        table_ident,
+        paren_expr,
+        array_expr,
+        struct_expr,
+    ));
+
+    return atom;
 }

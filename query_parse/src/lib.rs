@@ -3,75 +3,94 @@ mod parser;
 mod token;
 
 use chumsky::Parser;
-use db_core::expr::Expr;
+use chumsky::error::Rich;
+use chumsky::input::Input;
+use chumsky::span::SimpleSpan;
+use db_core::expr::{Expr, LineColSpan, Spanned};
 
 use db_core::query::Query;
 
-pub fn parse<'a>(query: &'a str) -> Option<Query> {
-    let tokens = lexer::lexer().parse(query).into_output()?;
-
-    let query = parser::parser().parse(&tokens).into_output()?;
-
-    Some(query)
+#[derive(Debug, PartialEq)]
+pub struct ParseError {
+    err: Rich<'static, String, SimpleSpan>,
 }
 
-pub fn parse_expr(input: &str) -> Option<Expr> {
-    let tokens = lexer::lexer().parse(input).into_output()?;
+impl ParseError {
+    pub fn span(&self) -> &SimpleSpan {
+        self.err.span()
+    }
 
-    let result = parser::parse_expr().parse(&tokens).into_output()?;
+    pub fn content(&self) -> String {
+        self.err.reason().to_string()
+    }
+}
 
-    Some(result)
+pub fn parse<'a>(query: &'a str) -> (Option<Query>, Vec<ParseError>) {
+    let (tokens, lexer_errors) = lexer::lexer().parse(query).into_output_errors();
+
+    let errors = lexer_errors.into_iter().map(|err| ParseError {
+        err: err.map_token(|t| t.to_string()).into_owned(),
+    });
+
+    let Some(tokens) = tokens else {
+        return (None, errors.collect());
+    };
+
+    let (query, parser_errors) = parser::parser()
+        .parse(tokens.as_slice().map(
+            (query.len()..query.len()).into(),
+            |Spanned { value, span }| (value, span),
+        ))
+        .into_output_errors();
+
+    let errors = parser_errors
+        .into_iter()
+        .map(|err| ParseError {
+            err: err.map_token(|t| format!("{:?}", t)).into_owned(),
+        })
+        .chain(errors);
+
+    (query, errors.collect())
+}
+
+pub fn parse_expr(input: &str) -> (Option<Spanned<Expr>>, Vec<ParseError>) {
+    let (tokens, lexer_errors) = lexer::lexer().parse(input).into_output_errors();
+
+    let errors = lexer_errors.into_iter().map(|err| ParseError {
+        err: err.map_token(|t| t.to_string()).into_owned(),
+    });
+
+    let Some(tokens) = tokens else {
+        return (None, errors.collect());
+    };
+    let (result, parser_errors) = parser::parse_expr()
+        .parse(tokens.as_slice().map(
+            (input.len()..input.len()).into(),
+            |Spanned { value, span }| (value, span),
+        ))
+        .into_output_errors();
+
+    let errors = parser_errors
+        .into_iter()
+        .map(|err| ParseError {
+            err: err.map_token(|t| format!("{:?}", t)).into_owned(),
+        })
+        .chain(errors);
+
+    (result, errors.collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use db_core::{
-        expr::{BinaryOp, CompareOp, EqOp, Expr, MathOp},
-        value::FieldValue,
-    };
-
     use super::*;
-
-    #[test]
-    fn test_parse() {
-        let input = "query user where 5 < 10 * 4 + 2 == true";
-
-        let query = parse(input).unwrap();
-
-        let expr = Expr::BinaryOp {
-            a: Box::new(Expr::BinaryOp {
-                a: Box::new(Expr::Literal(FieldValue::Int(5))),
-                op: BinaryOp::Compare(CompareOp::Less),
-                b: Box::new(Expr::BinaryOp {
-                    a: Box::new(Expr::BinaryOp {
-                        a: Box::new(Expr::Literal(FieldValue::Int(10))),
-                        op: BinaryOp::Math(MathOp::Mul),
-                        b: Box::new(Expr::Literal(FieldValue::Int(4))),
-                    }),
-                    op: BinaryOp::Math(MathOp::Add),
-                    b: Box::new(Expr::Literal(FieldValue::Int(2))),
-                }),
-            }),
-            op: BinaryOp::Eq(EqOp::Eq),
-            b: Box::new(Expr::Literal(FieldValue::Bool(true))),
-        };
-
-        let value = Query {
-            table_name: "user".into(),
-            filter: Some(expr),
-            group_by: None,
-            group_extra: None
-        };
-
-        assert_eq!(query, value);
-    }
 
     #[test]
     fn dbg_parse() {
         let input = "query user where user.age > 10";
 
-        let query = parse(input).unwrap();
+        let (query, errs) = parse(input);
 
+        dbg!(errs);
         dbg!(query);
     }
 }

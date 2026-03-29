@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    fmt::Write,
     sync::Arc,
 };
 
@@ -8,8 +9,11 @@ use crate::{Db, db::TableWithIdDef, error::DbError};
 
 use chrono::Utc;
 use db_core::{
-    asm_code::{AccessTableIdx, AsmRuntime, Program, QueryProvider, compile_expr},
-    expr::Expr,
+    asm_code::{
+        AccessTableIdx, AsmRuntime, CompilerDiagnostics, CompilerHighlight, CompilerMarker,
+        CompletionHint, Program, QueryProvider, compile_expr,
+    },
+    expr::{Expr, SimpleSpan, Spanned},
     query::{Query, QueryResult, QueryResultGroup, QueryResultRecords},
     record::RecordBytes,
     ty::{FieldTy, Ty},
@@ -62,8 +66,139 @@ impl QueryProvider for RecordQuery {
     }
 }
 
+pub struct CompiledQuery {
+    pub diagnostics: CompilerDiagnostics,
+    table_name: Arc<str>,
+    filter: Option<Program>,
+    group_by: Option<Program>,
+    group_extra: Option<Program>,
+}
+
 impl Db {
-    pub fn run_query(&self, query: &Query) -> Result<QueryResult, DbError> {
+    pub fn compile_query(&self, query: &Query) -> Result<CompiledQuery, CompilerDiagnostics> {
+        let mut diagnostics = CompilerDiagnostics::new();
+
+        let tables = self.inner.tables.read().unwrap();
+
+        let Some((table_name, table)) = tables.tables.get_key_value(&query.table_name.value) else {
+            diagnostics.add_marker(Spanned::new(
+                query.table_name.span,
+                CompilerMarker::Custom {
+                    message: format!("table {} does not exist", query.table_name.value),
+                    kind: db_core::asm_code::MarkerKind::Error,
+                },
+            ));
+
+            diagnostics.add_completion(Spanned::new(
+                query.table_name.span,
+                CompletionHint {
+                    options: tables
+                        .tables
+                        .keys()
+                        .map(|table_name| table_name.to_string())
+                        .collect(),
+                },
+            ));
+
+            return Err(diagnostics);
+        };
+
+        let table_data = table.clone();
+
+        {
+            let mut table_format = String::from("{\n  ");
+
+            for (idx, field) in table_data.fields().enumerate() {
+                if idx != 0 {
+                    table_format += ",\n  "
+                }
+                write!(&mut table_format, "{}: {:?}", field.name, field.value.ty).unwrap();
+            }
+
+            table_format += "\n}";
+
+            diagnostics.add_highlight(Spanned::new(
+                query.table_name.span,
+                CompilerHighlight {
+                    message: format!("table {table_format}"),
+                },
+            ));
+        }
+
+        let filter = query.filter.as_ref().map(|expr| {
+            Some(Spanned::new(
+                expr.span,
+                compile_expr(
+                    &expr.value,
+                    &tables.tables,
+                    &HashSet::new(),
+                    &mut diagnostics,
+                )?,
+            ))
+        });
+
+        let group_by = query.group_by.as_ref().map(|expr| {
+            compile_expr(
+                &expr.value,
+                &tables.tables,
+                &HashSet::new(),
+                &mut diagnostics,
+            )
+        });
+
+        let group_extra = query.group_extra.as_ref().map(|expr| {
+            compile_expr(
+                &expr.value,
+                &tables.tables,
+                &HashSet::from_iter([table_name.clone()]),
+                &mut diagnostics,
+            )
+        });
+
+        if let Some(Some(program)) = filter.as_ref() {
+            if program.value.return_ty != Ty::Field(FieldTy::Bool) {
+                diagnostics.add_marker(Spanned::new(
+                    program.span,
+                    CompilerMarker::Custom {
+                        message: "where expr does not eval to bool".to_owned(),
+                        kind: db_core::asm_code::MarkerKind::Error,
+                    },
+                ));
+
+                return Err(diagnostics);
+            }
+        }
+
+        fn map_some_some<T>(x: Option<Option<T>>) -> Result<Option<T>, ()> {
+            match x {
+                Some(None) => Err(()),
+                Some(Some(x)) => Ok(Some(x)),
+                None => Ok(None),
+            }
+        }
+
+        let (filter, group_by, group_extra) = match (
+            map_some_some(filter),
+            map_some_some(group_by),
+            map_some_some(group_extra),
+        ) {
+            (Ok(filter), Ok(group_by), Ok(group_extra)) => {
+                (filter.map(|filter| filter.value), group_by, group_extra)
+            }
+            _ => return Err(diagnostics),
+        };
+
+        Ok(CompiledQuery {
+            diagnostics,
+            table_name: table_name.clone(),
+            filter,
+            group_by,
+            group_extra,
+        })
+    }
+
+    pub fn run_query(&self, query: &CompiledQuery) -> Result<QueryResult, DbError> {
+        let mut diagnostics = CompilerDiagnostics::new();
         let now = Utc::now();
 
         let tables = self.inner.tables.read().unwrap();
@@ -84,16 +219,9 @@ impl Db {
 
             let mut filter_program = match &query.filter {
                 Some(filter) => {
-                    let program = compile_expr(filter, &tables.tables, &HashSet::new())
-                        .map_err(DbError::ExprCompileError)?;
+                    let record_query = RecordQuery::new(&filter, &tx);
 
-                    if program.return_ty != Ty::Field(FieldTy::Bool) {
-                        return Err(DbError::ExprError("'where' expression does not return bool"));
-                    }
-
-                    let record_query = RecordQuery::new(&program, &tx);
-
-                    Some((program, record_query))
+                    Some((filter, record_query))
                 }
                 None => None,
             };
@@ -118,7 +246,9 @@ impl Db {
                             .into_iter()
                             .map(|record| record.map(Cow::Borrowed))
                             .collect::<Option<Vec<_>>>()
-                            .ok_or(DbError::ExprError("not all record_table_indices records are filled"))?;
+                            .ok_or(DbError::ExprError(
+                                "not all record_table_indices records are filled",
+                            ))?;
 
                         let mut runtime = AsmRuntime::new(filter, records, record_query, []);
 
@@ -144,7 +274,7 @@ impl Db {
                     format: table_data,
                 }));
             }
-            Some(group_by) => {
+            Some(program) => {
                 #[derive(Default)]
                 struct GroupData {
                     extra: Option<Value>,
@@ -152,9 +282,6 @@ impl Db {
                 }
 
                 let mut groups = HashMap::<Value, GroupData>::new();
-
-                let program = compile_expr(group_by, &tables.tables, &HashSet::new())
-                    .map_err(DbError::ExprCompileError)?;
 
                 let mut record_query = RecordQuery::new(&program, &tx);
 
@@ -171,7 +298,9 @@ impl Db {
                         .into_iter()
                         .map(|record| record.map(Cow::Borrowed))
                         .collect::<Option<Vec<_>>>()
-                        .ok_or(DbError::ExprError("not all record_table_indices records are filled"))?;
+                        .ok_or(DbError::ExprError(
+                            "not all record_table_indices records are filled",
+                        ))?;
 
                     let mut runtime = AsmRuntime::new(&program, records, &mut record_query, []);
 
@@ -184,17 +313,13 @@ impl Db {
                     entries.records.push(record);
                 }
 
-                if let Some(group_extra) = &query.group_extra {
-                    let program = compile_expr(
-                        group_extra,
-                        &tables.tables,
-                        &HashSet::from_iter([query.table_name.clone()]),
-                    )
-                    .map_err(DbError::ExprCompileError)?;
-
+                if let Some(program) = &query.group_extra {
                     assert!(program.record_table_indices.is_empty());
                     assert!(program.access_table_indices.len() <= 1);
-                    assert!(program.access_table_indices.len() == 0 || &program.access_table_indices[0] == &query.table_name);
+                    assert!(
+                        program.access_table_indices.len() == 0
+                            || &program.access_table_indices[0] == &query.table_name
+                    );
 
                     let mut record_query = RecordQuery::new(&program, &tx);
 
@@ -207,13 +332,18 @@ impl Db {
                         //     }
                         // }
 
-                        let records = group.records
+                        let records = group
+                            .records
                             .iter()
                             .map(|record| Cow::Borrowed(record.bytes()))
                             .collect::<Vec<_>>();
 
-                        let mut runtime =
-                            AsmRuntime::new(&program, records, &mut record_query, [(AccessTableIdx(0), 0, group.records.len() as u32)]);
+                        let mut runtime = AsmRuntime::new(
+                            &program,
+                            records,
+                            &mut record_query,
+                            [(AccessTableIdx(0), 0, group.records.len() as u32)],
+                        );
 
                         runtime.run();
 
@@ -239,17 +369,20 @@ impl Db {
     }
 
     pub fn run_expr(&self, expr: &Expr) -> Result<Value, DbError> {
+        let mut diagnostics = CompilerDiagnostics::new();
         let now = Utc::now();
 
         let tables = self.inner.tables.read().unwrap();
 
         let tx = self.inner.db.begin_read()?;
 
-        let program = compile_expr(expr, &tables.tables, &HashSet::new())
-            .map_err(DbError::ExprCompileError)?;
+        let program =
+            compile_expr(expr, &tables.tables, &HashSet::new(), &mut diagnostics).unwrap();
 
         if !program.record_table_indices.is_empty() {
-            return Err(DbError::ExprError("expression is not allowed to contain table accesses"));
+            return Err(DbError::ExprError(
+                "expression is not allowed to contain table accesses",
+            ));
         }
 
         let mut record_query = RecordQuery::new(&program, &tx);

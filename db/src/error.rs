@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use db_core::{asm_code::AsmCompileErr, ty::FieldTy};
+use db_core::ty::FieldTy;
 use ulid::Ulid;
 
 #[derive(thiserror::Error, Debug)]
@@ -13,8 +13,6 @@ pub enum DbError {
     WrongType { expected: FieldTy },
     #[error("Table {table} does not exist")]
     TableDoesNotExist { table: Arc<str> },
-    #[error("Expression compile error\n{0}")]
-    ExprCompileError(AsmCompileErr),
     #[error("Expression error {0}")]
     ExprError(&'static str),
     #[error("Expression did panic")]

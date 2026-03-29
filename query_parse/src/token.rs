@@ -49,6 +49,8 @@ pub enum Separator {
     ParenClose,
     BracketOpen,
     BracketClose,
+    BraceOpen,
+    BraceClose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

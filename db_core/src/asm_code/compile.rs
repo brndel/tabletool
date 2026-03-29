@@ -5,17 +5,19 @@ use std::{
 };
 
 use bytepack::PackFormat;
+use chumsky::span::SimpleSpan;
 
 use crate::{
     asm_code::{
-        AsmCompileErr,
+        AsmCompileErr, CompletionHint,
         asm_code::{AccessTableIdx, AsmCode, IntBits, Literal},
         asm_iter::AsmIter,
+        complier_diagnostics::CompilerDiagnostics,
         pointer::{AsmPointer, AsmSlicePointer},
         program::Program,
     },
-    defs::table::TableData,
-    expr::{BinaryOp, Expr, MathOp},
+    defs::table::{TableData, TableDef, TableFieldDef},
+    expr::{BinaryOp, Expr, MathOp, Spanned},
     named::Named,
     ty::{FieldTy, IterTy, Ty},
     value::FieldValue,
@@ -27,23 +29,26 @@ pub fn compile_expr(
     expr: &Expr,
     tables: &BTreeMap<Arc<str>, Arc<TableData>>,
     iter_tables: &HashSet<Arc<str>>,
-) -> Result<Program, AsmCompileErr> {
+    diagnostics: &mut CompilerDiagnostics,
+) -> Option<Program> {
     let mut builder = CodeBuilder::default();
     let ctx = Ctx {
         builder: &mut builder,
         tables,
         iter_tables,
+        diagnostics,
     };
 
     let (_ptr, ty) = compile_expr_with_ctx(expr, ctx)?;
 
-    Ok(builder.finish(ty))
+    Some(builder.finish(ty))
 }
 
 struct Ctx<'a> {
     builder: &'a mut CodeBuilder,
     tables: &'a BTreeMap<Arc<str>, Arc<TableData>>,
     iter_tables: &'a HashSet<Arc<str>>,
+    diagnostics: &'a mut CompilerDiagnostics,
 }
 
 impl<'a> Ctx<'a> {
@@ -52,6 +57,7 @@ impl<'a> Ctx<'a> {
             builder: self.builder,
             tables: self.tables,
             iter_tables: self.iter_tables,
+            diagnostics: self.diagnostics,
         }
     }
 }
@@ -95,6 +101,10 @@ impl CodeBuilder {
             offset: self.stack_pointer,
         };
         self.stack_pointer += byte_count;
+        println!(
+            "reserved {} bytes, ptr is now {}",
+            byte_count, self.stack_pointer
+        );
         self.max_stack_pointer = self.max_stack_pointer.max(self.stack_pointer);
 
         pointer
@@ -102,6 +112,7 @@ impl CodeBuilder {
 
     fn set_stack_pointer(&mut self, offset: u32) {
         self.stack_pointer = offset;
+        println!("set stack pointer to {}", self.stack_pointer);
         self.max_stack_pointer = self.max_stack_pointer.max(self.stack_pointer);
     }
 
@@ -188,15 +199,28 @@ impl CodeBuilder {
     }
 }
 
-fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), AsmCompileErr> {
+fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> {
     match expr {
+        Expr::EmptyPlaceholder => None,
         Expr::Literal(field_value) => {
-            let result = match field_value {
+            let result = match &field_value.value {
                 FieldValue::Int(value) => {
+                    ctx.diagnostics.add_highlight(Spanned::new(
+                        field_value.span,
+                        super::CompilerHighlight {
+                            message: format!("value {value} has type i32"),
+                        },
+                    ));
                     let ptr = ctx.builder.push_stack(*value);
                     (ptr, Ty::Field(FieldTy::IntI32))
                 }
                 FieldValue::Bool(value) => {
+                    ctx.diagnostics.add_highlight(Spanned::new(
+                        field_value.span,
+                        super::CompilerHighlight {
+                            message: format!("value {value} has type bool"),
+                        },
+                    ));
                     let ptr = ctx.builder.push_stack(*value);
                     (ptr, Ty::Field(FieldTy::Bool))
                 }
@@ -229,7 +253,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                 }
             };
 
-            Ok(result)
+            Some(result)
         }
         Expr::Array(values) => {
             let iter_start_pointer = AsmPointer {
@@ -248,17 +272,21 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
             let mut control_pointer = iter_start_pointer;
             let mut control_ty_offset = 0;
 
-            for expr in values {
+            for Spanned { value: expr, span } in values {
                 ctx.builder.code.push(AsmCode::Comment("Iter Value"));
                 let (ptr, ty) = compile_expr_with_ctx(expr, ctx.nest())?;
 
                 match &inner_ty {
                     Some(inner_ty) => {
                         if inner_ty != &ty {
-                            return Err(AsmCompileErr::MissmatchedTy {
-                                expected: inner_ty.clone(),
-                                found: ty,
-                            });
+                            ctx.diagnostics.add_error(
+                                *span,
+                                AsmCompileErr::MissmatchedTy {
+                                    expected: inner_ty.clone(),
+                                    found: ty,
+                                },
+                            );
+                            return None;
                         }
                     }
                     None => {
@@ -267,8 +295,9 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                     }
                 }
                 if control_pointer != ptr {
-                    println!("invalid array element pointer thingy");
-                    panic!();
+                    panic!(
+                        "invalid array element pointer thingy. this is an internal compiler error and should not happen"
+                    );
                 }
 
                 control_pointer = control_pointer.add_offset(control_ty_offset);
@@ -276,7 +305,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
             let ty = inner_ty.unwrap_or(Ty::Any);
 
-            Ok((
+            Some((
                 ptr,
                 Ty::Iterator {
                     item_ty: Box::new(ty),
@@ -284,16 +313,70 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                 },
             ))
         }
+        Expr::Struct { fields } => {
+            let stack = ctx.builder.stack_pointer();
+
+            let fields = fields
+                .iter()
+                .map(|Spanned { value: field, span }| {
+                    let result = compile_expr_with_ctx(&field.value, ctx.nest())?;
+                    Some(Spanned {
+                        value: Named {
+                            name: field.name.clone(),
+                            value: result,
+                        },
+                        span: *span,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+
+            let table_def = TableDef {
+                fields: fields
+                    .iter()
+                    .map(|Spanned { value: field, span }| {
+                        let ty = match &field.value.1 {
+                            Ty::Field(field_ty) => field_ty.clone(),
+                            ty => {
+                                ctx.diagnostics.add_error(
+                                    *span,
+                                    AsmCompileErr::NonFieldTyInStruct { ty: ty.clone() },
+                                );
+
+                                return None;
+                            }
+                        };
+
+                        Some(Named {
+                            name: field.name.clone(),
+                            value: TableFieldDef {
+                                ty,
+                                has_index: false,
+                            },
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?,
+                main_display_field: None,
+            };
+
+            let table_data = TableData::from(table_def);
+
+            ctx.builder.set_stack_pointer(stack);
+            let ptr = ctx.builder.reserve_stack(table_data.fixed_byte_count());
+
+            Some((ptr, Ty::Struct(Arc::new(table_data))))
+        }
         Expr::BinaryOp { a, op, b } => {
             let stack = ctx.builder.stack_pointer();
 
-            let (a_ptr, a_ty) = compile_expr_with_ctx(&a, ctx.nest())?;
+            let a_result = compile_expr_with_ctx(&a.value, ctx.nest());
+            let b_result = compile_expr_with_ctx(&b.value, ctx.nest());
 
-            let (b_ptr, b_ty) = compile_expr_with_ctx(&b, ctx.nest())?;
+            let (a_ptr, a_ty) = a_result?;
+            let (b_ptr, b_ty) = b_result?;
 
             ctx.builder.set_stack_pointer(stack);
 
-            let result = match op {
+            let result = match op.value {
                 BinaryOp::Math(math_op) => {
                     if a_ty == Ty::Field(FieldTy::IntI32) && b_ty == Ty::Field(FieldTy::IntI32) {
                         let bits = IntBits::I32;
@@ -301,17 +384,21 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         ctx.builder.code.push(AsmCode::MathOp {
                             a: a_ptr,
                             b: b_ptr,
-                            op: *math_op,
+                            op: math_op,
                             target,
                             bits,
                         });
                         (target, Ty::Field(FieldTy::IntI32))
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy {
-                            op: op.clone(),
-                            a: a_ty,
-                            b: b_ty,
-                        });
+                        ctx.diagnostics.add_error(
+                            op.span,
+                            AsmCompileErr::InvalidBinaryOpTy {
+                                op: op.value,
+                                a: a_ty,
+                                b: b_ty,
+                            },
+                        );
+                        return None;
                     }
                 }
                 BinaryOp::Logic(logic_op) => {
@@ -320,16 +407,20 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         ctx.builder.code.push(AsmCode::LogicOp {
                             a: a_ptr,
                             b: b_ptr,
-                            op: *logic_op,
+                            op: logic_op,
                             target,
                         });
                         (target, Ty::Field(FieldTy::Bool))
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy {
-                            op: op.clone(),
-                            a: a_ty,
-                            b: b_ty,
-                        });
+                        ctx.diagnostics.add_error(
+                            op.span,
+                            AsmCompileErr::InvalidBinaryOpTy {
+                                op: op.value,
+                                a: a_ty,
+                                b: b_ty,
+                            },
+                        );
+                        return None;
                     }
                 }
                 BinaryOp::Compare(compare_op) => {
@@ -345,16 +436,20 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         });
                         target
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy {
-                            op: op.clone(),
-                            a: a_ty,
-                            b: b_ty,
-                        });
+                        ctx.diagnostics.add_error(
+                            op.span,
+                            AsmCompileErr::InvalidBinaryOpTy {
+                                op: op.value,
+                                a: a_ty,
+                                b: b_ty,
+                            },
+                        );
+                        return None;
                     };
 
                     ctx.builder.code.push(AsmCode::SetLiteralConditional {
                         test_result: target,
-                        op: crate::asm_code::asm_code::ConditionOp::Compare(*compare_op),
+                        op: crate::asm_code::asm_code::ConditionOp::Compare(compare_op),
                         target,
                         true_value: true.into(),
                         false_value: Some(false.into()),
@@ -377,11 +472,15 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         && let Ty::Field(FieldTy::RecordId { table_name: b_name }) = &b_ty
                     {
                         if a_name != b_name {
-                            return Err(AsmCompileErr::InvalidBinaryOpTy {
-                                op: op.clone(),
-                                a: a_ty,
-                                b: b_ty,
-                            });
+                            ctx.diagnostics.add_error(
+                                op.span,
+                                AsmCompileErr::InvalidBinaryOpTy {
+                                    op: op.value,
+                                    a: a_ty,
+                                    b: b_ty,
+                                },
+                            );
+                            return None;
                         }
 
                         let target = ctx.builder.reserve_stack(1);
@@ -401,16 +500,20 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         });
                         target
                     } else {
-                        return Err(AsmCompileErr::InvalidBinaryOpTy {
-                            op: op.clone(),
-                            a: a_ty,
-                            b: b_ty,
-                        });
+                        ctx.diagnostics.add_error(
+                            op.span,
+                            AsmCompileErr::InvalidBinaryOpTy {
+                                op: op.value,
+                                a: a_ty,
+                                b: b_ty,
+                            },
+                        );
+                        return None;
                     };
 
                     ctx.builder.code.push(AsmCode::SetLiteralConditional {
                         test_result: target,
-                        op: crate::asm_code::asm_code::ConditionOp::Eq(*eq_op),
+                        op: crate::asm_code::asm_code::ConditionOp::Eq(eq_op),
                         target,
                         true_value: true.into(),
                         false_value: Some(false.into()),
@@ -419,22 +522,26 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                 }
             };
 
-            Ok(result)
+            Some(result)
         }
         Expr::UnaryOp { op, value } => {
             let stack = ctx.builder.stack_pointer();
 
-            let (ptr, ty) = compile_expr_with_ctx(&value, ctx.nest())?;
+            let (ptr, ty) = compile_expr_with_ctx(&value.value, ctx.nest())?;
 
             ctx.builder.set_stack_pointer(stack);
 
-            let result = match op {
+            let result = match op.value {
                 crate::expr::UnaryOp::Negate => {
                     if ty != Ty::Field(FieldTy::IntI32) {
-                        return Err(AsmCompileErr::InvalidUnaryOpTy {
-                            op: op.clone(),
-                            value: ty,
-                        });
+                        ctx.diagnostics.add_error(
+                            op.span,
+                            AsmCompileErr::InvalidUnaryOpTy {
+                                op: op.value,
+                                value: ty,
+                            },
+                        );
+                        return None;
                     }
                     let bits = IntBits::I32;
                     let target = ctx.builder.reserve_stack(bits.bytes());
@@ -448,10 +555,14 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                 }
                 crate::expr::UnaryOp::LogicNot => {
                     if ty != Ty::Field(FieldTy::Bool) {
-                        return Err(AsmCompileErr::InvalidUnaryOpTy {
-                            op: op.clone(),
-                            value: ty,
-                        });
+                        ctx.diagnostics.add_error(
+                            op.span,
+                            AsmCompileErr::InvalidUnaryOpTy {
+                                op: op.value,
+                                value: ty,
+                            },
+                        );
+                        return None;
                     }
                     let target = ctx.builder.reserve_stack(1);
                     ctx.builder.code.push(AsmCode::LogicNot {
@@ -463,12 +574,19 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                 }
             };
 
-            Ok(result)
+            Some(result)
         }
-        Expr::FieldAccess { .. } => {
+        Expr::FieldAccess {
+            value: Spanned { value: _, span },
+            ..
+        } => {
             let stack = ctx.builder.stack_pointer;
 
-            let (access, ty) = compile_expr_in_field_access(expr, ctx.nest())?;
+            let FieldAccessResult {
+                access,
+                ty,
+                is_record_access,
+            } = compile_expr_in_field_access(expr, ctx.nest())?;
 
             match ty {
                 Ty::Field(field_ty) => {
@@ -500,21 +618,49 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
                             (target, Ty::Field(FieldTy::Bool))
                         }
-                        FieldTy::Timestamp => todo!(),
+                        FieldTy::Timestamp => {
+                            ctx.builder.set_stack_pointer(stack);
+
+                            let len = IntBits::I64.bytes();
+                            let target = ctx.builder.reserve_stack(len);
+                            ctx.builder.code.push(AsmCode::CopyIndirect {
+                                indirect_src: ptr,
+                                target,
+                                len,
+                            });
+
+                            (target, Ty::Field(FieldTy::Timestamp))
+                        }
                         FieldTy::Text => {
                             ctx.builder.set_stack_pointer(stack);
 
                             let target = ctx.builder.reserve_stack(AsmSlicePointer::BYTES);
-                            ctx.builder.code.push(AsmCode::CopyIndirect {
-                                indirect_src: ptr,
-                                target: target.add_offset(4),
-                                len: 8,
-                            });
-                            ctx.builder.code.push(AsmCode::Copy {
-                                src: ptr,
-                                target: target,
-                                len: 4,
-                            });
+
+                            if is_record_access {
+                                let temp_ptr = ctx.builder.reserve_stack(AsmPointer::BYTES);
+                                ctx.builder.code.push(AsmCode::Copy {
+                                    src: ptr,
+                                    target: temp_ptr,
+                                    len: AsmPointer::BYTES,
+                                });
+
+                                ctx.builder.code.push(AsmCode::CopyIndirect {
+                                    indirect_src: temp_ptr,
+                                    target: target.add_offset(4),
+                                    len: 8,
+                                });
+                                ctx.builder.code.push(AsmCode::Copy {
+                                    src: temp_ptr,
+                                    target: target,
+                                    len: 4,
+                                });
+                            } else {
+                                ctx.builder.code.push(AsmCode::CopyIndirect {
+                                    indirect_src: ptr,
+                                    target: target,
+                                    len: AsmSlicePointer::BYTES,
+                                });
+                            }
 
                             (target, Ty::Field(FieldTy::Text))
                         }
@@ -538,7 +684,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         }
                     };
 
-                    Ok(result)
+                    Some(result)
                 }
                 Ty::Iterator {
                     item_ty,
@@ -550,7 +696,8 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                         let result = ctx.builder.reserve_stack(AsmIter::BYTES);
 
                         let FieldAccessBase::RecordAccess { table_idx } = access.base else {
-                            return Err(AsmCompileErr::FieldAccessOnNoneRecordIter);
+                            todo!();
+                            // return Err(AsmCompileErr::FieldAccessOnNoneRecordIter);
                         };
 
                         ctx.builder.code.push(AsmCode::GetRecordIterPointer {
@@ -559,7 +706,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                             target: result,
                         });
 
-                        Ok((
+                        Some((
                             result,
                             Ty::Iterator {
                                 item_ty,
@@ -567,32 +714,66 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                             },
                         ))
                     }
-                    _ => Err(AsmCompileErr::FieldAccessOnInvalidTy {
-                        ty: Ty::Iterator {
-                            item_ty,
-                            kind: IterTy::Record,
-                        },
-                    }),
+                    _ => {
+                        ctx.diagnostics.add_error(
+                            *span,
+                            AsmCompileErr::FieldAccessOnInvalidTy {
+                                ty: Ty::Iterator {
+                                    item_ty,
+                                    kind: IterTy::Record,
+                                },
+                            },
+                        );
+
+                        return None;
+                    }
                 },
-                ty => Err(AsmCompileErr::FieldAccessOnInvalidTy { ty }),
+                ty => {
+                    ctx.diagnostics
+                        .add_error(*span, AsmCompileErr::FieldAccessOnInvalidTy { ty });
+
+                    return None;
+                }
             }
         }
-        Expr::TableAccess { .. } => Err(AsmCompileErr::TableAccessWithoutField),
-        Expr::FnCall { name, args } => match name.as_ref() {
+        Expr::TableAccess {
+            name: Spanned { value: _, span },
+        } => {
+            ctx.diagnostics.add_completion(Spanned::new(
+                *span,
+                CompletionHint {
+                    options: ctx
+                        .tables
+                        .keys()
+                        .map(|table_name| table_name.to_string())
+                        .collect(),
+                },
+            ));
+
+            ctx.diagnostics
+                .add_error(*span, AsmCompileErr::TableAccessWithoutField);
+
+            return None;
+        }
+        Expr::FnCall { name, args } => match name.value.as_ref() {
             "str_len" => {
                 if args.len() != 1 {
-                    return Err(AsmCompileErr::WrongArgCount {
-                        fn_name: "str_len",
-                        expected: 1,
-                        found: args.len(),
-                    });
+                    ctx.diagnostics.add_error(
+                        name.span,
+                        AsmCompileErr::WrongArgCount {
+                            fn_name: "str_len",
+                            expected: 1,
+                            found: args.len(),
+                        },
+                    );
+                    return None;
                 }
 
                 let arg = &args[0];
 
                 let stack = ctx.builder.stack_pointer;
 
-                let (arg_ptr, arg_ty) = compile_expr_with_ctx(arg, ctx.nest())?;
+                let (arg_ptr, arg_ty) = compile_expr_with_ctx(&arg.value, ctx.nest())?;
 
                 match arg_ty {
                     Ty::Field(FieldTy::Text) => {
@@ -605,21 +786,31 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                             len: IntBits::U32.bytes(),
                         });
 
-                        Ok((result, Ty::Field(FieldTy::IntI32)))
+                        Some((result, Ty::Field(FieldTy::IntI32)))
                     }
-                    ty => Err(AsmCompileErr::MissmatchedTy {
-                        expected: Ty::Field(FieldTy::Text),
-                        found: ty,
-                    }),
+                    ty => {
+                        ctx.diagnostics.add_error(
+                            arg.span,
+                            AsmCompileErr::MissmatchedTy {
+                                expected: Ty::Field(FieldTy::Text),
+                                found: ty,
+                            },
+                        );
+                        return None;
+                    }
                 }
             }
             "sum" => {
                 if args.len() != 1 {
-                    return Err(AsmCompileErr::WrongArgCount {
-                        fn_name: "sum",
-                        expected: 1,
-                        found: args.len(),
-                    });
+                    ctx.diagnostics.add_error(
+                        name.span,
+                        AsmCompileErr::WrongArgCount {
+                            fn_name: "sum",
+                            expected: 1,
+                            found: args.len(),
+                        },
+                    );
+                    return None;
                 }
 
                 let arg = &args[0];
@@ -628,7 +819,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
                 let stack = ctx.builder.stack_pointer;
 
-                let (iter_ptr, ty) = compile_expr_with_ctx(arg, ctx.nest())?;
+                let (iter_ptr, ty) = compile_expr_with_ctx(&arg.value, ctx.nest())?;
 
                 match ty {
                     Ty::Iterator { item_ty, kind } => match *item_ty {
@@ -702,7 +893,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
                                     });
                                 }
                             }
-                            
+
                             ctx.builder.code.push(AsmCode::MathOp {
                                 a: iter_ptr.add_offset(AsmIter::REMAINING_ELEM_OFFSET),
                                 b: one_ptr,
@@ -719,16 +910,32 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Result<(AsmPointer, Ty), 
 
                             ctx.builder.set_stack_pointer(stack);
 
-                            Ok((result_ptr, Ty::Field(FieldTy::IntI32)))
+                            Some((result_ptr, Ty::Field(FieldTy::IntI32)))
                         }
-                        ty => return Err(AsmCompileErr::SumWrongIterThiny { ty: ty }),
+                        ty => {
+                            ctx.diagnostics.add_error(
+                                arg.span,
+                                AsmCompileErr::SumNotCalledOnI32Iter { ty: ty },
+                            );
+                            return None;
+                        }
                     },
-                    ty => return Err(AsmCompileErr::SumWrongIterThiny { ty: ty }),
+                    ty => {
+                        ctx.diagnostics
+                            .add_error(arg.span, AsmCompileErr::SumNotCalledOnI32Iter { ty: ty });
+                        return None;
+                    }
                 }
             }
-            fn_name => Err(AsmCompileErr::UnkownFn {
-                fn_name: fn_name.to_owned(),
-            }),
+            fn_name => {
+                ctx.diagnostics.add_error(
+                    name.span,
+                    AsmCompileErr::UnkownFn {
+                        fn_name: fn_name.to_owned(),
+                    },
+                );
+                return None;
+            }
         },
     }
 }
@@ -795,43 +1002,132 @@ impl FieldAccess {
     }
 }
 
-fn compile_expr_in_field_access(
-    expr: &Expr,
-    mut ctx: Ctx,
-) -> Result<(FieldAccess, Ty), AsmCompileErr> {
+struct FieldAccessResult {
+    access: FieldAccess,
+    ty: Ty,
+    is_record_access: bool,
+}
+
+fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Option<FieldAccessResult> {
     match expr {
-        Expr::FieldAccess { value, field } => {
-            let (access, ty) = compile_expr_in_field_access(value, ctx.nest())?;
+        Expr::FieldAccess {
+            value,
+            dot_span,
+            field: None,
+        } => {
+            let FieldAccessResult {
+                access,
+                ty,
+                is_record_access: _,
+            } = compile_expr_in_field_access(&value.value, ctx.nest())?;
+
+            if let Ty::Record(table) = ty {
+                ctx.diagnostics.add_completion(Spanned::new(
+                    *dot_span,
+                    CompletionHint {
+                        options: table
+                            .value
+                            .fields()
+                            .map(|field| field.name.to_string())
+                            .collect(),
+                    },
+                ));
+            }
+
+            ctx.diagnostics
+                .add_error(*dot_span, AsmCompileErr::FieldAccessMissingName);
+            return None;
+        }
+        Expr::FieldAccess {
+            value,
+            field:
+                Some(Spanned {
+                    value: field,
+                    span: field_span,
+                }),
+            dot_span,
+        } => {
+            let FieldAccessResult {
+                access,
+                ty,
+                is_record_access: _,
+            } = compile_expr_in_field_access(&value.value, ctx.nest())?;
 
             match ty {
                 Ty::Record(table) => {
+                    ctx.diagnostics.add_completion(Spanned::new(
+                        *field_span,
+                        CompletionHint {
+                            options: table
+                                .value
+                                .fields()
+                                .map(|field| field.name.to_string())
+                                .collect(),
+                        },
+                    ));
+
                     let Some(field) = table.value.field(field) else {
-                        return Err(AsmCompileErr::UnkownTableField {
-                            field: field.clone(),
-                            table_name: table.name,
-                        });
+                        ctx.diagnostics.add_error(
+                            *field_span,
+                            AsmCompileErr::UnkownTableField {
+                                field: field.clone(),
+                                table_name: table.name,
+                            },
+                        );
+                        return None;
                     };
 
-                    Ok((access.add_offset(field.offset), Ty::Field(field.ty.clone())))
+                    Some(FieldAccessResult {
+                        access: access.add_offset(field.offset),
+                        ty: Ty::Field(field.ty.clone()),
+                        is_record_access: true,
+                    })
+                }
+                Ty::Struct(table) => {
+                    let Some(field) = table.field(field) else {
+                        ctx.diagnostics.add_error(
+                            *field_span,
+                            AsmCompileErr::UnkownTableField {
+                                field: field.clone(),
+                                table_name: "struct table".into(),
+                            },
+                        );
+                        return None;
+                    };
+
+                    Some(FieldAccessResult {
+                        access: access.add_offset(field.offset),
+                        ty: Ty::Field(field.ty.clone()),
+                        is_record_access: false,
+                    })
                 }
                 Ty::Iterator { item_ty, kind } => match (*item_ty, kind) {
                     (Ty::Record(table), IterTy::Record) => {
                         let Some(field) = table.value.field(field) else {
-                            return Err(AsmCompileErr::UnkownTableField {
-                                field: field.clone(),
-                                table_name: table.name,
-                            });
+                            ctx.diagnostics.add_error(
+                                *field_span,
+                                AsmCompileErr::UnkownTableField {
+                                    field: field.clone(),
+                                    table_name: table.name,
+                                },
+                            );
+                            return None;
                         };
 
-                        Ok((
-                            access.add_offset(field.offset),
-                            Ty::Iterator {
+                        Some(FieldAccessResult {
+                            access: access.add_offset(field.offset),
+                            ty: Ty::Iterator {
                                 item_ty: Box::new(Ty::Field(field.ty.clone())),
                                 kind: IterTy::Record,
                             },
-                        ))
+                            is_record_access: true,
+                        })
                     }
-                    _ => Err(AsmCompileErr::FieldAccessOnNoneRecordIter),
+                    _ => {
+                        ctx.diagnostics
+                            .add_error(*field_span, AsmCompileErr::FieldAccessOnNoneRecordIter);
+                        return None;
+                    }
                 },
                 Ty::Field(FieldTy::RecordId { table_name }) => {
                     let table_idx = ctx.builder.access_table_idx(&table_name);
@@ -839,64 +1135,101 @@ fn compile_expr_in_field_access(
                     let table = ctx.tables.get(&table_name).unwrap();
 
                     let Some(field) = table.field(field) else {
-                        return Err(AsmCompileErr::UnkownTableField {
-                            field: field.clone(),
-                            table_name,
-                        });
+                        ctx.diagnostics.add_error(
+                            *field_span,
+                            AsmCompileErr::UnkownTableField {
+                                field: field.clone(),
+                                table_name: table_name,
+                            },
+                        );
+                        return None;
                     };
 
                     let ptr = access.to_ptr(ctx.builder);
 
-                    Ok((
-                        FieldAccess {
+                    Some(FieldAccessResult {
+                        access: FieldAccess {
                             offset: field.offset,
                             base: FieldAccessBase::QueryRecord { table_idx, id: ptr },
                         },
-                        Ty::Field(field.ty.clone()),
-                    ))
+                        ty: Ty::Field(field.ty.clone()),
+                        is_record_access: true,
+                    })
                 }
-                ty => Err(AsmCompileErr::FieldAccessOnInvalidTy { ty }),
+                ty => {
+                    ctx.diagnostics
+                        .add_error(*field_span, AsmCompileErr::FieldAccessOnInvalidTy { ty });
+                    return None;
+                }
             }
         }
-        Expr::TableAccess { name } => {
-            let table = ctx.tables.get(name).unwrap();
+        Expr::TableAccess {
+            name: Spanned { value: name, span },
+        } => {
+            ctx.diagnostics.add_completion(Spanned::new(
+                *span,
+                CompletionHint {
+                    options: ctx
+                        .tables
+                        .keys()
+                        .map(|table_name| table_name.to_string())
+                        .collect(),
+                },
+            ));
+
+            let Some(table) = ctx.tables.get(name) else {
+                ctx.diagnostics.add_error(
+                    *span,
+                    AsmCompileErr::UnkownTable {
+                        table_name: name.clone(),
+                    },
+                );
+                return None;
+            };
+
             let is_iter_table = ctx.iter_tables.contains(name);
 
             if is_iter_table {
                 let table_idx = ctx.builder.access_table_idx(name);
 
-                Ok((
-                    FieldAccess {
+                Some(FieldAccessResult {
+                    access: FieldAccess {
                         offset: 0,
                         base: FieldAccessBase::RecordAccess { table_idx },
                     },
-                    Ty::Iterator {
+                    ty: Ty::Iterator {
                         item_ty: Box::new(Ty::Record(Named {
                             name: name.clone(),
                             value: table.clone(),
                         })),
                         kind: IterTy::Record,
                     },
-                ))
+                    is_record_access: true,
+                })
             } else {
                 let table_idx = ctx.builder.record_table_idx(name);
 
-                Ok((
-                    FieldAccess::ptr(AsmPointer {
+                Some(FieldAccessResult {
+                    access: FieldAccess::ptr(AsmPointer {
                         namespace: Namespace::Record { idx: table_idx },
                         offset: 0,
                     }),
-                    Ty::Record(Named {
+                    ty: Ty::Record(Named {
                         name: name.clone(),
                         value: table.clone(),
                     }),
-                ))
+                    is_record_access: true,
+                })
             }
         }
         expr => {
             let (ptr, ty) = compile_expr_with_ctx(expr, ctx.nest())?;
 
-            Ok((FieldAccess::ptr(ptr), ty))
+            Some(FieldAccessResult {
+                access: FieldAccess::ptr(ptr),
+                ty,
+                is_record_access: false,
+            })
         }
     }
 }
@@ -911,6 +1244,7 @@ fn ty_byte_count(ty: &Ty) -> u32 {
             FieldTy::RecordId { table_name } => IntBits::U128.bytes(),
         },
         Ty::Record(named) => AsmPointer::BYTES,
+        Ty::Struct(table) => todo!(),
         Ty::Iterator { .. } => AsmIter::BYTES,
         Ty::Any => panic!(),
     }

@@ -35,6 +35,7 @@ impl FieldTy {
 pub enum Ty {
     Field(FieldTy),
     Record(Named<Arc<TableData>>),
+    Struct(Arc<TableData>),
     Iterator { item_ty: Box<Self>, kind: IterTy },
     Any,
 }

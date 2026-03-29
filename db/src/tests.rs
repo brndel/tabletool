@@ -6,7 +6,7 @@ use std::{
 
 use bytepack::BytePacker;
 use db_core::{
-    asm_code::{AsmRuntime, compile_expr},
+    asm_code::{AsmRuntime, CompilerDiagnostics, compile_expr},
     defs::table::{TableData, TableDef, TableFieldDef},
     named::Named,
 };
@@ -15,9 +15,15 @@ use db_core::{
 fn expr_end2end() {
     let input = "-1 > -2 && (1 + 2 * 2) == 5";
 
-    let expr = query_parse::parse_expr(input).unwrap();
+    let expr = query_parse::parse_expr(input).0.unwrap();
 
-    let program = compile_expr(&expr, &BTreeMap::new(), &HashSet::new()).unwrap();
+    let program = compile_expr(
+        &expr.value,
+        &BTreeMap::new(),
+        &HashSet::new(),
+        &mut CompilerDiagnostics::new(),
+    )
+    .unwrap();
 
     let mut query = ();
     let mut runtime = AsmRuntime::new(&program, Vec::new(), &mut query, []);
@@ -31,9 +37,15 @@ fn expr_end2end() {
 fn expr_math() {
     let input = "1 + 1 + 1";
 
-    let expr = query_parse::parse_expr(input).unwrap();
+    let expr = query_parse::parse_expr(input).0.unwrap();
 
-    let program = compile_expr(&expr, &BTreeMap::new(), &HashSet::new()).unwrap();
+    let program = compile_expr(
+        &expr.value,
+        &BTreeMap::new(),
+        &HashSet::new(),
+        &mut CompilerDiagnostics::new(),
+    )
+    .unwrap();
 
     let mut query = ();
     let mut runtime = AsmRuntime::new(&program, Vec::new(), &mut query, []);
@@ -47,7 +59,7 @@ fn expr_math() {
 fn table_field_access() {
     let input = "person.age * 2 > 10 && person.has_pet && person.name == \"Billy\"";
 
-    let expr = query_parse::parse_expr(input).unwrap();
+    let expr = query_parse::parse_expr(input).0.unwrap();
 
     let table = TableDef {
         fields: vec![
@@ -85,7 +97,13 @@ fn table_field_access() {
 
     let tables = BTreeMap::from_iter([("person".into(), Arc::new(table))]);
 
-    let program = compile_expr(&expr, &tables, &HashSet::new()).unwrap();
+    let program = compile_expr(
+        &expr.value,
+        &tables,
+        &HashSet::new(),
+        &mut CompilerDiagnostics::new(),
+    )
+    .unwrap();
 
     let mut query = ();
     let mut runtime = AsmRuntime::new(&program, vec![Cow::Borrowed(&record)], &mut query, []);

@@ -1,34 +1,44 @@
 use std::sync::Arc;
 
+use chumsky::span::SimpleSpan;
+
 use crate::{
-    expr::
-        op::{BinaryOp, UnaryOp}
-    ,
+    expr::{
+        Spanned,
+        op::{BinaryOp, UnaryOp},
+    },
+    named::Named,
     value::FieldValue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
-    Literal(FieldValue),
-    Array(Vec<Self>),
+    Literal(Spanned<FieldValue>),
+    Array(Vec<Spanned<Self>>),
+    Struct {
+        fields: Vec<Spanned<Named<Self>>>,
+    },
     BinaryOp {
-        a: Box<Self>,
-        op: BinaryOp,
-        b: Box<Self>,
+        a: Spanned<Box<Self>>,
+        op: Spanned<BinaryOp>,
+        b: Spanned<Box<Self>>,
     },
     UnaryOp {
-        op: UnaryOp,
-        value: Box<Self>,
+        op: Spanned<UnaryOp>,
+        value: Spanned<Box<Self>>,
     },
     FieldAccess {
-        value: Box<Self>,
-        field: Arc<str>,
+        value: Spanned<Box<Self>>,
+        dot_span: SimpleSpan,
+        field: Option<Spanned<Arc<str>>>,
     },
     TableAccess {
-        name: Arc<str>,
+        name: Spanned<Arc<str>>,
     },
     FnCall {
-        name: Arc<str>,
-        args: Vec<Self>,
+        name: Spanned<Arc<str>>,
+        args: Vec<Spanned<Self>>,
     },
+    /// Used for autocompletion slots
+    EmptyPlaceholder,
 }
