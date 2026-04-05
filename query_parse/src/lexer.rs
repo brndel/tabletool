@@ -31,7 +31,7 @@ pub fn lexer<'src>()
     ]).map(|op| Token::Op(op));
 
     let separator = choice([
-        just("->").to(Separator::Arrow),
+        just("=>").to(Separator::Arrow),
         just(".").to(Separator::Dot),
         just(",").to(Separator::Comma),
         just(":").to(Separator::Colon),
@@ -41,6 +41,7 @@ pub fn lexer<'src>()
         just("]").to(Separator::BracketClose),
         just("{").to(Separator::BraceOpen),
         just("}").to(Separator::BraceClose),
+        just("|").to(Separator::Bar)
     ])
     .map(|op| Token::Separator(op));
 

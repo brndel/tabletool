@@ -11,6 +11,7 @@ pub struct AsmPointer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Namespace {
     Stack,
+    NegativeStack,
     Heap,
     Const,
     Record { idx: u16 },
@@ -107,8 +108,9 @@ impl From<Namespace> for NamespaceBytes {
     fn from(value: Namespace) -> Self {
         let (namespace_tag, idx): (u16, u16) = match value {
             Namespace::Stack => (0, 0),
-            Namespace::Heap => (1, 0),
-            Namespace::Const => (2, 0),
+            Namespace::NegativeStack => (1, 0),
+            Namespace::Heap => (2, 0),
+            Namespace::Const => (3, 0),
             Namespace::Record { idx } => (3, idx),
         };
 
@@ -125,9 +127,10 @@ impl From<NamespaceBytes> for Namespace {
 
         let namespace = match u16::from_be_bytes(value.namespace_tag) {
             0 => Namespace::Stack,
-            1 => Namespace::Heap,
-            2 => Namespace::Const,
-            3 => Namespace::Record { idx: extra },
+            1 => Namespace::NegativeStack,
+            2 => Namespace::Heap,
+            3 => Namespace::Const,
+            4 => Namespace::Record { idx: extra },
             i => unreachable!("invalid namespace tag {i}"),
         };
 

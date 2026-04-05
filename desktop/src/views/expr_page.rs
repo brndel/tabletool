@@ -176,9 +176,7 @@ pub fn ExprPage() -> Element {
             Err(diagnostics) => diagnostics,
         };
 
-        let highlight = dbg!(diagnostics.completions()).get_before(index);
-
-        dbg!(&highlight);
+        let highlight = diagnostics.completions().get_before(index);
 
         match highlight {
             Some(value) => value
@@ -194,6 +192,7 @@ pub fn ExprPage() -> Element {
     rsx! {
 
         MonacoEditor { model: text_value, markers, hover_provider, completion_provider }
+        
         {query_button("query project group_by project.group")}
         {query_button("query work_time where work_time.project.is_fun")}
         {query_button("query work_time group_by work_time.project.group")}
@@ -204,9 +203,9 @@ pub fn ExprPage() -> Element {
         // div {
         //     "Result: {expr_result:?}",
         // }
-        div {
-            "Query: {query:?}",
-        }
+        // div {
+        //     "Query: {query:?}",
+        // }
         match query_db_result.transpose() {
             Some(result) => match result.transpose() {
                 Ok(result) => rsx! {

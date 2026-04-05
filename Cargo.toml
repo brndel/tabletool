@@ -29,6 +29,11 @@ thiserror = "2.0"
 
 chumsky = { version = "1.0.0-alpha.8", features = ["pratt"] }
 
+wasmer = "7.1"
+wasmer-types = "7.1"
+wasm-encoder = "0.246"
+
+
 [profile]
 
 [profile.wasm-dev]

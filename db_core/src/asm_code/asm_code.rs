@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, sync::Arc};
+use std::cmp::Ordering;
 
 use chrono::{DateTime, Utc};
 use ulid::Ulid;
@@ -6,7 +6,7 @@ use ulid::Ulid;
 use crate::{
     asm_code::{
         asm_iter::AsmIter,
-        pointer::{AsmPointer, AsmSlicePointer, Namespace},
+        asm_pointer::{AsmPointer, AsmSlicePointer, Namespace},
         runtime::{AsmRuntime, QueryProvider},
     },
     expr::{CompareOp, EqOp, LogicOp, MathOp},
@@ -102,6 +102,7 @@ pub enum AsmCode<Pointer = AsmPointer> {
         offset: u32,
         target: Pointer,
     },
+    Return,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -268,7 +269,7 @@ impl AsmCode {
                 target,
                 len,
             } => {
-                let value = runtime.get_indirect(indirect_src, *len).to_owned();  // TODO: add runtime.copy(...)
+                let value = runtime.get_indirect(indirect_src, *len).to_owned(); // TODO: add runtime.copy(...)
                 runtime.set(target, &value);
             }
             AsmCode::SetLiteralConditional {
@@ -378,14 +379,17 @@ impl AsmCode {
 
                 runtime.set(target, Literal::from(pointer).as_ref());
             }
+            AsmCode::Return => {
+                runtime.pop_stack_frame()
+            }
         }
     }
 
     fn ordering_byte(ordering: Ordering) -> u8 {
         match ordering {
-            std::cmp::Ordering::Less => 'l' as u8,
-            std::cmp::Ordering::Equal => 'e' as u8,
-            std::cmp::Ordering::Greater => 'g' as u8,
+            std::cmp::Ordering::Less => b'l',
+            std::cmp::Ordering::Equal => b'e',
+            std::cmp::Ordering::Greater => b'g',
         }
     }
 
@@ -396,14 +400,17 @@ impl AsmCode {
     ) -> bool {
         let [result]: [u8; 1] = runtime.get(test_result, 1).try_into().unwrap();
 
-        match (op, result as char) {
-            (ConditionOp::Compare(CompareOp::Greater), 'g') => true,
-            (ConditionOp::Compare(CompareOp::GreaterEq), 'g' | 'e') => true,
-            (ConditionOp::Compare(CompareOp::Less), 'l') => true,
-            (ConditionOp::Compare(CompareOp::LessEq), 'l' | 'e') => true,
-            (ConditionOp::Eq(EqOp::Eq), 'e') => true,
-            (ConditionOp::Eq(EqOp::Neq), 'l' | 'g') => true,
-            _ => false,
+        let result_char = result as char;
+
+        match op {
+            ConditionOp::Compare(CompareOp::Greater) => matches!(result_char, 'g'),
+            ConditionOp::Compare(CompareOp::GreaterEq) => matches!(result_char, 'g' | 'e'),
+            ConditionOp::Compare(CompareOp::Less) => matches!(result_char, 'l'),
+            ConditionOp::Compare(CompareOp::LessEq) => matches!(result_char, 'l' | 'e'),
+            ConditionOp::Eq(EqOp::Eq) => matches!(result_char, 'e'),
+            ConditionOp::Eq(EqOp::Neq) => matches!(result_char, 'l' | 'g'),
+            ConditionOp::BoolTrue => result == 1,
+            ConditionOp::BoolFalse => result == 0,
         }
     }
 }
@@ -434,10 +441,12 @@ impl IntBits {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ConditionOp {
     Compare(CompareOp),
     Eq(EqOp),
+    BoolTrue,
+    BoolFalse,
 }
 
 impl ConditionOp {
@@ -449,6 +458,8 @@ impl ConditionOp {
             ConditionOp::Compare(CompareOp::LessEq) => ConditionOp::Compare(CompareOp::Greater),
             ConditionOp::Eq(EqOp::Eq) => ConditionOp::Eq(EqOp::Neq),
             ConditionOp::Eq(EqOp::Neq) => ConditionOp::Eq(EqOp::Eq),
+            ConditionOp::BoolTrue => ConditionOp::BoolFalse,
+            ConditionOp::BoolFalse => ConditionOp::BoolTrue,
         }
     }
 }

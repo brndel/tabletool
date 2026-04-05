@@ -1,14 +1,10 @@
 use std::mem::transmute;
 
-use crate::asm_code::{asm_code::Literal, pointer::AsmPointer};
+use crate::asm_code::{asm_code::Literal, asm_pointer::AsmPointer};
 
 pub struct AsmIter {
     pub current_element: AsmPointer,
     pub remaining_elements: u32,
-}
-
-pub enum AsmIterKind {
-    Array,
 }
 
 #[repr(C)]

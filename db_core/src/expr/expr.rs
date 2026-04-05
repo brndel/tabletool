@@ -32,12 +32,16 @@ pub enum Expr {
         dot_span: SimpleSpan,
         field: Option<Spanned<Arc<str>>>,
     },
-    TableAccess {
+    Variable {
         name: Spanned<Arc<str>>,
     },
     FnCall {
         name: Spanned<Arc<str>>,
         args: Vec<Spanned<Self>>,
+    },
+    LambdaFn {
+        args: Vec<Spanned<Arc<str>>>,
+        body: Spanned<Box<Self>>
     },
     /// Used for autocompletion slots
     EmptyPlaceholder,

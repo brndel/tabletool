@@ -198,7 +198,6 @@ impl Db {
     }
 
     pub fn run_query(&self, query: &CompiledQuery) -> Result<QueryResult, DbError> {
-        let mut diagnostics = CompilerDiagnostics::new();
         let now = Utc::now();
 
         let tables = self.inner.tables.read().unwrap();
@@ -347,7 +346,7 @@ impl Db {
 
                         runtime.run();
 
-                        group.extra = Some(runtime.result().unwrap())
+                        group.extra = Some(runtime.result().map_err(DbError::ExprPanic)?)
                     }
                 }
 

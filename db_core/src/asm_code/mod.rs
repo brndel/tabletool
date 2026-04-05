@@ -1,6 +1,6 @@
 mod asm_code;
 mod compile;
-mod pointer;
+mod asm_pointer;
 mod program;
 mod runtime;
 mod asm_iter;

@@ -1,11 +1,11 @@
-use std::{borrow::Cow, collections::HashMap, iter, ops::Range, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, iter, mem, ops::Range, sync::Arc};
 
 use ulid::Ulid;
 
 use crate::{
     asm_code::{
         asm_code::{AccessTableIdx, IntBits},
-        pointer::{AsmPointer, AsmSlicePointer, Namespace},
+        asm_pointer::{AsmPointer, AsmSlicePointer, Namespace},
         program::Program,
     },
     ty::{FieldTy, Ty},
@@ -22,7 +22,10 @@ pub struct AsmRuntime<'code, 'record, Q: QueryProvider> {
     records: Vec<Cow<'record, [u8]>>,
     record_index: HashMap<AccessTableIdx, RecordIndex>,
     panic_message: Option<String>,
+    is_done: bool,
 }
+
+const ASM_RUNTIME_STACK_FRAME_BYTES: u32 = 8;
 
 #[derive(Default)]
 struct RecordIndex {
@@ -39,6 +42,12 @@ impl QueryProvider for () {
     fn get_record(&mut self, _table_name: AccessTableIdx, _id: Ulid) -> Option<Vec<u8>> {
         None
     }
+}
+
+enum MemRangeKind {
+    Stack,
+    NegativeStack,
+    Other,
 }
 
 impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
@@ -68,6 +77,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
                 },
             )),
             panic_message: None,
+            is_done: false,
         }
     }
 
@@ -76,7 +86,10 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
         //     println!("[{:04}] {:?}", pointer, instruction);
         // }
         // println!("----- START -----");
-        while self.instruction_pointer < self.program.code.len() && self.panic_message.is_none() {
+        while !self.is_done
+            && self.instruction_pointer < self.program.code.len()
+            && self.panic_message.is_none()
+        {
             let instruction = &self.program.code[self.instruction_pointer];
             // println!("[{:04}] {:?}", self.instruction_pointer, instruction);
 
@@ -140,9 +153,13 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
         i32::from_be_bytes(result.try_into().unwrap())
     }
 
-    fn get_mem_range(&self, mut offset: u32, len: u32, is_stack: bool) -> Range<usize> {
-        if is_stack {
-            offset += self.stack_pointer;
+    fn get_mem_range(&self, mut offset: u32, len: u32, kind: MemRangeKind) -> Range<usize> {
+        match kind {
+            MemRangeKind::Stack => offset = self.stack_pointer + offset,
+            MemRangeKind::NegativeStack => {
+                offset = self.stack_pointer - ASM_RUNTIME_STACK_FRAME_BYTES - offset
+            }
+            MemRangeKind::Other => (),
         }
 
         (offset as usize)..((offset + len) as usize)
@@ -150,13 +167,22 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
 
     pub fn get(&self, pointer: &AsmPointer, len: u32) -> &[u8] {
         match pointer.namespace {
-            Namespace::Stack => &self.stack[self.get_mem_range(pointer.offset, len, true)],
-            Namespace::Heap => &self.heap[self.get_mem_range(pointer.offset, len, false)],
+            Namespace::Stack => {
+                &self.stack[self.get_mem_range(pointer.offset, len, MemRangeKind::Stack)]
+            }
+            Namespace::NegativeStack => {
+                &self.stack[self.get_mem_range(pointer.offset, len, MemRangeKind::NegativeStack)]
+            }
+            Namespace::Heap => {
+                &self.heap[self.get_mem_range(pointer.offset, len, MemRangeKind::Other)]
+            }
             Namespace::Const => {
-                &self.program.const_memory[self.get_mem_range(pointer.offset, len, false)]
+                &self.program.const_memory
+                    [self.get_mem_range(pointer.offset, len, MemRangeKind::Other)]
             }
             Namespace::Record { idx } => {
-                &self.records[idx as usize][self.get_mem_range(pointer.offset, len, false)]
+                &self.records[idx as usize]
+                    [self.get_mem_range(pointer.offset, len, MemRangeKind::Other)]
             }
         }
     }
@@ -173,11 +199,21 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
     pub fn set(&mut self, pointer: &AsmPointer, value: &[u8]) {
         let slice = match pointer.namespace {
             Namespace::Stack => {
-                let range = self.get_mem_range(pointer.offset, value.len() as u32, true);
+                let range =
+                    self.get_mem_range(pointer.offset, value.len() as u32, MemRangeKind::Stack);
+                &mut self.stack[range]
+            }
+            Namespace::NegativeStack => {
+                let range = self.get_mem_range(
+                    pointer.offset,
+                    value.len() as u32,
+                    MemRangeKind::NegativeStack,
+                );
                 &mut self.stack[range]
             }
             Namespace::Heap => {
-                let range = self.get_mem_range(pointer.offset, value.len() as u32, true);
+                let range =
+                    self.get_mem_range(pointer.offset, value.len() as u32, MemRangeKind::Other);
                 &mut self.stack[range]
             }
             Namespace::Const => panic!("cannot write to const memory"),
@@ -200,10 +236,6 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
             namespace: Namespace::Heap,
             offset,
         }
-    }
-
-    pub fn reserve_stack(&mut self, byte_count: u32) {
-        self.stack.extend(iter::repeat(0).take(byte_count as usize));
     }
 
     pub fn query_record(&mut self, table_idx: AccessTableIdx, id: Ulid) -> Option<u16> {
@@ -230,6 +262,70 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
 
     pub fn get_record_iter_info(&self, table_idx: AccessTableIdx) -> Option<(u16, u32)> {
         self.record_index.get(&table_idx)?.record_idx
+    }
+
+    pub fn reserve_stack(&mut self, byte_count: u32) {
+        self.stack.extend(iter::repeat(0).take(byte_count as usize));
+    }
+
+    pub fn pop_stack_frame(&mut self) {
+        if self.stack_pointer == 0 {
+            self.is_done = true
+        } else {
+            let stack_pointer_bytes = self.get(
+                &AsmPointer {
+                    namespace: Namespace::NegativeStack,
+                    offset: ASM_RUNTIME_STACK_FRAME_BYTES,
+                },
+                IntBits::U32.bytes(),
+            );
+
+            let stack_pointer = u32::from_be_bytes(stack_pointer_bytes.try_into().unwrap());
+
+            self.stack_pointer = stack_pointer;
+            self.stack.truncate(self.stack_pointer as usize);
+
+            let instruction_pointer_bytes = self.get(
+                &AsmPointer {
+                    namespace: Namespace::NegativeStack,
+                    offset: ASM_RUNTIME_STACK_FRAME_BYTES - IntBits::U32.bytes(),
+                },
+                IntBits::U32.bytes(),
+            );
+
+            let instruction_pointer =
+                u32::from_be_bytes(instruction_pointer_bytes.try_into().unwrap()) as usize;
+
+            self.instruction_pointer = instruction_pointer;
+
+        }
+    }
+
+    pub fn push_stack_frame(&mut self, stack_size: u32) {
+        let stack_pointer = self.stack_pointer;
+        let instruction_pointer = self.instruction_pointer as u32;
+
+        let local_stack_end = self.stack.len() as u32 - stack_pointer;
+
+        self.reserve_stack(IntBits::U32.bytes() * 2);
+
+        let value: [u8; 8] = unsafe {
+            mem::transmute([
+                stack_pointer.to_be_bytes(),
+                instruction_pointer.to_be_bytes(),
+            ])
+        };
+
+        self.set(
+            &AsmPointer {
+                namespace: Namespace::Stack,
+                offset: local_stack_end,
+            },
+            &value,
+        );
+
+        self.stack_pointer = self.stack.len() as u32;
+        self.reserve_stack(stack_size);
     }
 
     pub fn panic(&mut self, message: String) {

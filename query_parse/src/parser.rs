@@ -1,9 +1,10 @@
 use chrono::DateTime;
 use chumsky::{
     IterParser, Parser,
+    container::Seq,
     error::Rich,
     extra,
-    input::{SliceInput, ValueInput},
+    input::ValueInput,
     pratt::{infix, left, prefix},
     prelude::{choice, just, recursive},
     select,
@@ -66,112 +67,35 @@ where
     I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
 {
     recursive(|expr| {
-        // let fn_call = select! { Token::Ident(ident) = e => Spanned::new(e.span(), ident.into()) }
-        //     .then(
-        //         expr.clone()
-        //             .map_with(|expr, extra| Spanned::new(extra.span(), expr))
-        //             .separated_by(just(Token::Separator(Separator::Comma)))
-        //             .collect()
-        //             .delimited_by(
-        //                 just(Token::Separator(Separator::ParenOpen)),
-        //                 just(Token::Separator(Separator::ParenClose)),
-        //             ),
-        //     )
-        //     .map(|(name, args)| Expr::FnCall { name, args });
-
-        // let num = select! {
-        //     Token::Number(num) => num,
-        // }
-        // .try_map(|num, span| {
-        //     if let Ok(value) = num.parse() {
-        //         Ok(FieldValue::Int(value))
-        //     } else {
-        //         Err(Rich::custom(span, "Invalid integer"))
-        //     }
-        // });
-
-        // let special_literal = select! {
-        //     Token::SpecialLiteral { tag, content } => (tag, content)
-        // }
-        // .try_map(|(tag, content), span| match tag {
-        //     "id" => match content.split_once(":") {
-        //         Some((table, id)) => {
-        //             let id = Ulid::from_string(id)
-        //                 .map_err(|err| Rich::custom(span, format!("{:?}", err)))?;
-        //             Ok(FieldValue::RecordId {
-        //                 id,
-        //                 table_name: table.into(),
-        //             })
-        //         }
-        //         None => Err(Rich::custom(
-        //             span,
-        //             format!("id literal needs format '<table name>:<id>'"),
-        //         )),
-        //     },
-        //     "dt" => match DateTime::parse_from_rfc3339(content) {
-        //         Ok(dt) => Ok(FieldValue::Timestamp(dt.to_utc())),
-        //         Err(err) => Err(Rich::custom(span, format!("{:?}", err))),
-        //     },
-        //     _ => Err(Rich::custom(span, format!("unkown literal tag '{tag}'"))),
-        // });
-
-        // let literal = select! {
-        //     Token::Keyword(Keyword::True) => FieldValue::Bool(true),
-        //     Token::Keyword(Keyword::False) => FieldValue::Bool(false),
-        //     Token::StringLiteral(value) => FieldValue::Text(value.to_owned()),
-        // }
-        // .or(num)
-        // .or(special_literal)
-        // .map_with(|literal, extra| Expr::Literal(Spanned::new(extra.span(), literal)));
-
-        // let table_ident = select! {
-        //     Token::Ident(ident) = e => Expr::TableAccess { name: Spanned::new(e.span(), ident.into()) }
-        // };
-
-        // let paren_expr = expr.clone().delimited_by(
-        //     just(Token::Separator(Separator::ParenOpen)),
-        //     just(Token::Separator(Separator::ParenClose)),
-        // );
-
-        // let array_expr = expr
-        //     .clone()
-        //     .map_with(|expr, extra| Spanned::new(extra.span(), expr))
-        //     .separated_by(just(Token::Separator(Separator::Comma)))
-        //     .allow_trailing()
-        //     .collect()
-        //     .delimited_by(
-        //         just(Token::Separator(Separator::BracketOpen)),
-        //         just(Token::Separator(Separator::BracketClose)),
-        //     )
-        //     .map(|exprs| Expr::Array(exprs));
-
-        // let ident = select! {Token::Ident(s) => s};
-
-        // let struct_expr = ident
-        //     .then_ignore(just(Token::Separator(Separator::Colon)))
-        //     .then(expr.clone())
-        //     .map_with(|(name, value), extra| Spanned::new(extra.span(), Named::new(name, value)))
-        //     .separated_by(just(Token::Separator(Separator::Comma)))
-        //     .allow_trailing()
-        //     .collect()
-        //     .delimited_by(
-        //         just(Token::Separator(Separator::BraceOpen)),
-        //         just(Token::Separator(Separator::BraceClose)),
-        //     )
-        //     .map(|fields| Expr::Struct { fields });
-
-        // let atom = choice((
-        //     fn_call,
-        //     literal,
-        //     table_ident,
-        //     paren_expr,
-        //     array_expr,
-        //     struct_expr,
-        // ));
-
         let atom = parse_atom(expr);
 
-        let field_access = atom.foldl_with(
+        // let tail_fn_call = atom.clone().foldl_with(
+        //     just(Token::Separator(Separator::Dot))
+        //         .ignore_then(select! {
+        //             Token::Ident(ident) = e => Spanned::new(e.span(), ident.into())
+        //         })
+        //         .then(
+        //             atom.separated_by(just(Token::Separator(Separator::Comma)))
+        //                 .allow_trailing()
+        //                 .collect::<Vec<_>>()
+        //                 .delimited_by(
+        //                     just(Token::Separator(Separator::ParenOpen)),
+        //                     just(Token::Separator(Separator::ParenClose)),
+        //                 ),
+        //         )
+        //         .repeated(),
+        //     |value, (fn_name, fn_args), extra| {
+        //         Spanned::new(
+        //             extra.span(),
+        //             Expr::FnCall {
+        //                 name: fn_name,
+        //                 args: std::iter::once(value).chain(fn_args).collect(),
+        //             },
+        //         )
+        //     },
+        // );
+
+        let field_access = atom.clone().foldl_with(
             just(Token::Separator(Separator::Dot))
                 .to_span()
                 .then(
@@ -180,20 +104,33 @@ where
                     }
                     .or_not(),
                 )
+                .then(
+                    atom.separated_by(just(Token::Separator(Separator::Comma)))
+                        .allow_trailing()
+                        .collect::<Vec<_>>()
+                        .delimited_by(
+                            just(Token::Separator(Separator::ParenOpen)),
+                            just(Token::Separator(Separator::ParenClose)),
+                        )
+                        .or_not(),
+                )
                 .repeated(),
-            |value, (dot_span, field), extra| {
-                Spanned::new(
-                    extra.span(),
-                    Expr::FieldAccess {
+            |value, ((dot_span, field), fn_args), extra| {
+                let expr = match fn_args {
+                    Some(fn_args) => Expr::FnCall {
+                        name: field.unwrap_or_else(|| Spanned::new(dot_span, Default::default())),
+                        args: std::iter::once(value).chain(fn_args).collect(),
+                    },
+                    None => Expr::FieldAccess {
                         value: value.map(Box::new),
                         dot_span,
                         field: field,
                     },
-                )
+                };
+
+                Spanned::new(extra.span(), expr)
             },
         );
-
-        // return field_access;
 
         let unary_op = select! {
             Token::Op(Op::Minus) = e => Spanned::new(e.span(), UnaryOp::Negate),
@@ -239,10 +176,19 @@ where
         }
 
         let ops = field_access.pratt((
-            prefix(10, unary_op, |op: Spanned<UnaryOp>, value: Spanned<Expr>, extra| Spanned::new(extra.span(), Expr::UnaryOp {
-                op,
-                value: value.map(Box::new),
-            })),
+            prefix(
+                10,
+                unary_op,
+                |op: Spanned<UnaryOp>, value: Spanned<Expr>, extra| {
+                    Spanned::new(
+                        extra.span(),
+                        Expr::UnaryOp {
+                            op,
+                            value: value.map(Box::new),
+                        },
+                    )
+                },
+            ),
             infix(left(9), product_op, binary_fold!()),
             infix(left(8), sum_op, binary_fold!()),
             infix(left(7), compare_op, binary_fold!()),
@@ -323,8 +269,8 @@ where
         )
     });
 
-    let table_ident = select! {
-        Token::Ident(ident) = e => Spanned::new(e.span(), Expr::TableAccess { name: Spanned::new(e.span(), ident.into()) })
+    let variable = select! {
+        Token::Ident(ident) = e => Spanned::new(e.span(), Expr::Variable { name: Spanned::new(e.span(), ident.into()) })
     };
 
     let paren_expr = expr.clone().delimited_by(
@@ -358,13 +304,35 @@ where
         )
         .map_with(|fields, extra| Spanned::new(extra.span(), Expr::Struct { fields }));
 
+    let ident = select! {Token::Ident(s) = e => Spanned::new(e.span(), s.into())};
+
+    let lambda_fn = ident
+        .separated_by(just(Token::Separator(Separator::Comma)))
+        .collect()
+        .delimited_by(
+            just(Token::Separator(Separator::Bar)),
+            just(Token::Separator(Separator::Bar)),
+        )
+        .then_ignore(just(Token::Separator(Separator::Arrow)))
+        .then(expr)
+        .map_with(|(args, body), extra| {
+            Spanned::new(
+                extra.span(),
+                Expr::LambdaFn {
+                    args,
+                    body: body.map(Box::new),
+                },
+            )
+        });
+
     let atom = choice((
         fn_call,
         literal,
-        table_ident,
+        variable,
         paren_expr,
         array_expr,
         struct_expr,
+        lambda_fn,
     ));
 
     return atom;
