@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use db_core::expr::{CompareOp, EqOp, LogicOp};
+use db_core::{expr::{CompareOp, EqOp, LogicOp}, ty::FieldTy};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
     Keyword(Keyword),
     Ident(&'src str),
@@ -13,7 +13,7 @@ pub enum Token<'src> {
     Separator(Separator),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Keyword {
     Query,
     Where,
@@ -21,6 +21,8 @@ pub enum Keyword {
     GroupExtra,
     True,
     False,
+    Let,
+    FieldTy(FieldTy),
 }
 
 impl FromStr for Keyword {
@@ -34,6 +36,9 @@ impl FromStr for Keyword {
             "group_extra" => Ok(Self::GroupBy),
             "true" => Ok(Self::True),
             "false" => Ok(Self::False),
+            "let" => Ok(Self::Let),
+            "i32" => Ok(Self::FieldTy(FieldTy::IntI32)),
+            "bool" => Ok(Self::FieldTy(FieldTy::Bool)),
             _ => Err(()),
         }
     }
@@ -45,6 +50,7 @@ pub enum Separator {
     Arrow,
     Comma,
     Colon,
+    Semicolon,
     ParenOpen,
     ParenClose,
     BracketOpen,
@@ -52,6 +58,7 @@ pub enum Separator {
     BraceOpen,
     BraceClose,
     Bar,
+    Assign
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

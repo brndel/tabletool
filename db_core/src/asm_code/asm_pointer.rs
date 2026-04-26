@@ -73,7 +73,7 @@ impl From<AsmSlicePointer> for Literal {
     fn from(value: AsmSlicePointer) -> Self {
         let pointer = AsmSlicePointerBytes {
             pointer: value.pointer.into(),
-            len: value.len.to_be_bytes(),
+            len: value.len.to_le_bytes(),
         };
 
         let result: [u8; 12] = unsafe { transmute(pointer) };
@@ -90,7 +90,7 @@ impl AsmSlicePointer {
     pub fn from_bytes(bytes: [u8; Self::BYTES as usize]) -> Self {
         let bytes: AsmSlicePointerBytes = unsafe { transmute(bytes) };
 
-        let len = u32::from_be_bytes(bytes.len);
+        let len = u32::from_le_bytes(bytes.len);
 
         let pointer = AsmPointer::from(bytes.pointer);
 
@@ -115,17 +115,17 @@ impl From<Namespace> for NamespaceBytes {
         };
 
         Self {
-            namespace_tag: namespace_tag.to_be_bytes(),
-            namespace_extra: idx.to_be_bytes(),
+            namespace_tag: namespace_tag.to_le_bytes(),
+            namespace_extra: idx.to_le_bytes(),
         }
     }
 }
 
 impl From<NamespaceBytes> for Namespace {
     fn from(value: NamespaceBytes) -> Self {
-        let extra = u16::from_be_bytes(value.namespace_extra);
+        let extra = u16::from_le_bytes(value.namespace_extra);
 
-        let namespace = match u16::from_be_bytes(value.namespace_tag) {
+        let namespace = match u16::from_le_bytes(value.namespace_tag) {
             0 => Namespace::Stack,
             1 => Namespace::NegativeStack,
             2 => Namespace::Heap,
@@ -148,7 +148,7 @@ impl From<AsmPointer> for AsmPointerBytes {
     fn from(value: AsmPointer) -> Self {
         Self {
             namespace: value.namespace.into(),
-            offset: value.offset.to_be_bytes(),
+            offset: value.offset.to_le_bytes(),
         }
     }
 }
@@ -157,7 +157,7 @@ impl From<AsmPointerBytes> for AsmPointer {
     fn from(value: AsmPointerBytes) -> Self {
         Self {
             namespace: Namespace::from(value.namespace),
-            offset: u32::from_be_bytes(value.offset),
+            offset: u32::from_le_bytes(value.offset),
         }
     }
 }

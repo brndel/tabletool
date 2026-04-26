@@ -1,8 +1,8 @@
-mod table_ext;
-mod record_ext;
 mod index_ext;
-mod trigger_ext;
 mod query_ext;
+mod record_ext;
+mod table_ext;
+mod trigger_ext;
 
 use db_core::record::RecordBytes;
 
@@ -14,8 +14,8 @@ use std::{
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use ulid::Ulid;
 
-use crate::{db::table_ext::DbTables};
-     
+use crate::db::table_ext::DbTables;
+
 #[derive(Clone)]
 pub struct Db {
     inner: Arc<DbInner>,
@@ -24,6 +24,7 @@ pub struct Db {
 pub struct DbInner {
     db: redb::Database,
     tables: RwLock<DbTables>,
+    wasm_store: RwLock<wasmer::Store>,
 }
 
 pub use query_ext::CompiledQuery;
@@ -37,6 +38,7 @@ impl Db {
         let inner = DbInner {
             db,
             tables: RwLock::new(Default::default()),
+            wasm_store: RwLock::new(wasmer::Store::default())
         };
 
         let this = Self {
@@ -96,7 +98,4 @@ impl Db {
     }
 }
 
-
-impl DbTables {
-
-}
+impl DbTables {}

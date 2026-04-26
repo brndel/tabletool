@@ -2,7 +2,7 @@ use std::{fmt::Display, mem};
 
 use chumsky::span::SimpleSpan;
 
-use crate::{asm_code::AsmCompileErr, expr::Spanned};
+use crate::{compile::CompileErr, expr::Spanned};
 
 #[derive(Default, Debug)]
 pub struct CompilerDiagnostics {
@@ -13,7 +13,7 @@ pub struct CompilerDiagnostics {
 
 #[derive(Debug)]
 pub enum CompilerMarker {
-    Error(AsmCompileErr),
+    Error(CompileErr),
     Custom { message: String, kind: MarkerKind },
 }
 
@@ -60,7 +60,7 @@ impl CompilerDiagnostics {
         self.markers.push(marker);
     }
 
-    pub fn add_error(&mut self, span: SimpleSpan, error: AsmCompileErr) {
+    pub fn add_error(&mut self, span: SimpleSpan, error: CompileErr) {
         self.markers
             .push(Spanned::new(span, CompilerMarker::Error(error)));
     }

@@ -35,13 +35,15 @@ pub fn lexer<'src>()
         just(".").to(Separator::Dot),
         just(",").to(Separator::Comma),
         just(":").to(Separator::Colon),
+        just(";").to(Separator::Semicolon),
         just("(").to(Separator::ParenOpen),
         just(")").to(Separator::ParenClose),
         just("[").to(Separator::BracketOpen),
         just("]").to(Separator::BracketClose),
         just("{").to(Separator::BraceOpen),
         just("}").to(Separator::BraceClose),
-        just("|").to(Separator::Bar)
+        just("|").to(Separator::Bar),
+        just("=").to(Separator::Assign),
     ])
     .map(|op| Token::Separator(op));
 

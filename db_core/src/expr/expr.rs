@@ -5,6 +5,7 @@ use chumsky::span::SimpleSpan;
 use crate::{
     expr::{
         Spanned,
+        instr::Instruction,
         op::{BinaryOp, UnaryOp},
     },
     named::Named,
@@ -19,16 +20,16 @@ pub enum Expr {
         fields: Vec<Spanned<Named<Self>>>,
     },
     BinaryOp {
-        a: Spanned<Box<Self>>,
+        a: Box<Spanned<Self>>,
         op: Spanned<BinaryOp>,
-        b: Spanned<Box<Self>>,
+        b: Box<Spanned<Self>>,
     },
     UnaryOp {
         op: Spanned<UnaryOp>,
-        value: Spanned<Box<Self>>,
+        value: Box<Spanned<Self>>,
     },
     FieldAccess {
-        value: Spanned<Box<Self>>,
+        value: Box<Spanned<Self>>,
         dot_span: SimpleSpan,
         field: Option<Spanned<Arc<str>>>,
     },
@@ -41,8 +42,22 @@ pub enum Expr {
     },
     LambdaFn {
         args: Vec<Spanned<Arc<str>>>,
-        body: Spanned<Box<Self>>
+        body: Box<Spanned<Self>>,
     },
+    Block(ExprBlock),
+    Query(QueryExpr),
     /// Used for autocompletion slots
     EmptyPlaceholder,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExprBlock {
+    pub instructions: Vec<Spanned<Instruction>>,
+    pub return_expr: Option<Box<Spanned<Expr>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryExpr {
+    pub table_name: Spanned<Arc<str>>,
+    pub filter: Option<Box<Spanned<Expr>>>,
 }

@@ -12,14 +12,14 @@ use crate::{
         AsmCompileErr, CompletionHint,
         asm_code::{AccessTableIdx, AsmCode, ConditionOp, IntBits, Literal},
         asm_iter::AsmIter,
-        complier_diagnostics::CompilerDiagnostics,
         asm_pointer::{AsmPointer, AsmSlicePointer},
+        complier_diagnostics::CompilerDiagnostics,
         program::Program,
     },
     defs::table::{TableData, TableDef, TableFieldDef},
     expr::{BinaryOp, Expr, MathOp, Spanned},
     named::Named,
-    ty::{FieldTy, IterTy, Ty},
+    ty::{FieldTy, IterKind, Ty},
     value::FieldValue,
 };
 
@@ -351,7 +351,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
                 ptr,
                 Ty::Iterator {
                     item_ty: Box::new(ty),
-                    kind: IterTy::Array,
+                    kind: IterKind::Array,
                 },
             ))
         }
@@ -797,7 +797,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
                 }
                 Ty::Iterator {
                     item_ty,
-                    kind: IterTy::Record,
+                    kind: IterKind::Record,
                 } => match item_ty.as_ref() {
                     Ty::Field(FieldTy::IntI32 | FieldTy::Bool) => {
                         ctx.builder.set_stack_pointer(stack);
@@ -819,7 +819,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
                             result,
                             Ty::Iterator {
                                 item_ty,
-                                kind: IterTy::Record,
+                                kind: IterKind::Record,
                             },
                         ))
                     }
@@ -829,7 +829,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
                             AsmCompileErr::FieldAccessOnInvalidTy {
                                 ty: Ty::Iterator {
                                     item_ty,
-                                    kind: IterTy::Record,
+                                    kind: IterKind::Record,
                                 },
                             },
                         );
@@ -965,7 +965,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
                             });
 
                             match kind {
-                                IterTy::Array => {
+                                IterKind::Array => {
                                     let iter_offset_ptr = iter_ptr.add_offset(
                                         AsmIter::CURRENT_ELEM_PTR_OFFSET
                                             + AsmPointer::OFFSET_OFFSET,
@@ -978,7 +978,7 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
                                         bits: IntBits::U32,
                                     });
                                 }
-                                IterTy::Record => {
+                                IterKind::Record => {
                                     let iter_record_idx_ptr = iter_ptr.add_offset(
                                         AsmIter::CURRENT_ELEM_PTR_OFFSET
                                             + AsmPointer::RECORD_IDX_OFFSET,
@@ -1039,6 +1039,10 @@ fn compile_expr_with_ctx(expr: &Expr, mut ctx: Ctx) -> Option<(AsmPointer, Ty)> 
         Expr::LambdaFn { args, body } => {
             todo!()
         }
+        Expr::Block(_) => {
+            todo!()
+        }
+        Expr::Query(_) => todo!(),
     }
 }
 
@@ -1186,7 +1190,7 @@ fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Option<FieldAccess
                     })
                 }
                 Ty::Iterator { item_ty, kind } => match (*item_ty, kind) {
-                    (Ty::Record(table), IterTy::Record) => {
+                    (Ty::Record(table), IterKind::Record) => {
                         let Some(field) = table.value.field(field) else {
                             ctx.diagnostics.add_error(
                                 *field_span,
@@ -1202,7 +1206,7 @@ fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Option<FieldAccess
                             access: access.add_offset(field.offset),
                             ty: Ty::Iterator {
                                 item_ty: Box::new(Ty::Field(field.ty.clone())),
-                                kind: IterTy::Record,
+                                kind: IterKind::Record,
                             },
                             is_record_access: true,
                         })
@@ -1267,7 +1271,7 @@ fn compile_expr_in_field_access(expr: &Expr, mut ctx: Ctx) -> Option<FieldAccess
                             name: name.clone(),
                             value: table,
                         })),
-                        kind: IterTy::Record,
+                        kind: IterKind::Record,
                     },
                     is_record_access: true,
                 })
@@ -1311,6 +1315,7 @@ fn ty_byte_count(ty: &Ty) -> u32 {
         Ty::Record(named) => AsmPointer::BYTES,
         Ty::Struct(table) => todo!(),
         Ty::Iterator { .. } => AsmIter::BYTES,
+        Ty::Unit => panic!(),
         Ty::Any => panic!(),
     }
 }

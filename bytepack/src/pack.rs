@@ -28,7 +28,7 @@ pub trait Unpack<'b>: Sized {
 // impl PackToBytes for u8 {
 //     const BYTE_COUNT: u32 = Self::BITS / 8;
 //     fn to_bytes(&self) -> impl AsRef<[u8]> {
-//         self.to_be_bytes()
+//         self.to_le_bytes()
 //     }
 // }
 
@@ -36,7 +36,7 @@ pub trait Unpack<'b>: Sized {
 //     fn from_bytes(bytes: &'b [u8]) -> Option<Self> {
 //         let bytes = bytes.try_into().unwrap();
 
-//         Some(Self::from_be_bytes(bytes))
+//         Some(Self::from_le_bytes(bytes))
 //     }
 // }
 
@@ -66,7 +66,7 @@ macro_rules! num_pack {
             const PACK_BYTES: u32 = Self::BITS / 8;
 
             fn pack(&self, offset: u32, packer: &mut BytePacker) {
-                packer.pack_bytes(offset, self.to_be_bytes().as_ref());
+                packer.pack_bytes(offset, self.to_le_bytes().as_ref());
             }
         }
 
@@ -79,7 +79,7 @@ macro_rules! num_pack {
 
                 let bytes = bytes.try_into().unwrap();
 
-                Some(Self::from_be_bytes(bytes))
+                Some(Self::from_le_bytes(bytes))
             }
         }
     };

@@ -57,7 +57,7 @@ impl<'b> Unpack<'b> for InlinePointerUnpack<'b> {
         let pointer = PackPointer::unpack(offset, unpacker)?;
 
         if pointer.offset == 0 {
-            let tag = pointer.len.to_be_bytes();
+            let tag = pointer.len.to_le_bytes();
             Some(Self::Inline { tag })
         } else {
             let value = unpacker.read_bytes(pointer);

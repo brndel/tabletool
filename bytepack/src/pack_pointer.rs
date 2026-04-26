@@ -14,13 +14,13 @@ impl PackPointer {
     pub const fn inline(tag: [u8; 4]) -> Self {
         Self {
             offset: 0,
-            len: u32::from_be_bytes(tag),
+            len: u32::from_le_bytes(tag),
         }
     }
 
     pub const fn inline_tag(&self) -> Option<[u8; 4]> {
         if self.offset == 0 {
-            Some(self.len.to_be_bytes())
+            Some(self.len.to_le_bytes())
         } else {
             None
         }
@@ -32,7 +32,7 @@ impl Pack for PackPointer {
 
     fn pack(&self, offset: u32, packer: &mut BytePacker) {
         let bytes =
-            unsafe { transmute::<_, [u8; 8]>([self.offset.to_be_bytes(), self.len.to_be_bytes()]) };
+            unsafe { transmute::<_, [u8; 8]>([self.offset.to_le_bytes(), self.len.to_le_bytes()]) };
 
         packer.pack_bytes(offset, bytes.as_ref());
     }
@@ -48,8 +48,8 @@ impl<'b> Unpack<'b> for PackPointer {
         let ptr = <[u8; 8]>::try_from(bytes).unwrap();
         let [offset_bytes, len_bytes] = unsafe { transmute::<_, [[u8; 4]; 2]>(ptr) };
 
-        let offset = u32::from_be_bytes(offset_bytes);
-        let len = u32::from_be_bytes(len_bytes);
+        let offset = u32::from_le_bytes(offset_bytes);
+        let len = u32::from_le_bytes(len_bytes);
 
         Some(Self { offset, len })
     }

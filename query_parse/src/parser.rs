@@ -9,10 +9,12 @@ use chumsky::{
     prelude::{choice, just, recursive},
     select,
     span::SimpleSpan,
+    text::ascii::ident,
 };
 use db_core::{
-    expr::{BinaryOp, Expr, MathOp, Spanned, UnaryOp},
+    expr::{BinaryOp, Expr, ExprBlock, Instruction, MathOp, QueryExpr, Spanned, UnaryOp},
     named::Named,
+    ty::{FieldTy, Ty},
     ulid::Ulid,
     value::FieldValue,
 };
@@ -69,32 +71,6 @@ where
     recursive(|expr| {
         let atom = parse_atom(expr);
 
-        // let tail_fn_call = atom.clone().foldl_with(
-        //     just(Token::Separator(Separator::Dot))
-        //         .ignore_then(select! {
-        //             Token::Ident(ident) = e => Spanned::new(e.span(), ident.into())
-        //         })
-        //         .then(
-        //             atom.separated_by(just(Token::Separator(Separator::Comma)))
-        //                 .allow_trailing()
-        //                 .collect::<Vec<_>>()
-        //                 .delimited_by(
-        //                     just(Token::Separator(Separator::ParenOpen)),
-        //                     just(Token::Separator(Separator::ParenClose)),
-        //                 ),
-        //         )
-        //         .repeated(),
-        //     |value, (fn_name, fn_args), extra| {
-        //         Spanned::new(
-        //             extra.span(),
-        //             Expr::FnCall {
-        //                 name: fn_name,
-        //                 args: std::iter::once(value).chain(fn_args).collect(),
-        //             },
-        //         )
-        //     },
-        // );
-
         let field_access = atom.clone().foldl_with(
             just(Token::Separator(Separator::Dot))
                 .to_span()
@@ -122,7 +98,7 @@ where
                         args: std::iter::once(value).chain(fn_args).collect(),
                     },
                     None => Expr::FieldAccess {
-                        value: value.map(Box::new),
+                        value: Box::new(value),
                         dot_span,
                         field: field,
                     },
@@ -166,9 +142,9 @@ where
                     Spanned::new(
                         extra.span(),
                         Expr::BinaryOp {
-                            a: Spanned::map(a, Box::new),
+                            a: Box::new(a),
                             op,
-                            b: Spanned::map(b, Box::new),
+                            b: Box::new(b),
                         },
                     )
                 }
@@ -184,7 +160,7 @@ where
                         extra.span(),
                         Expr::UnaryOp {
                             op,
-                            value: value.map(Box::new),
+                            value: Box::new(value),
                         },
                     )
                 },
@@ -289,6 +265,10 @@ where
         )
         .map_with(|exprs, extra| Spanned::new(extra.span(), Expr::Array(exprs)));
 
+    let block_expr = parse_block(expr.clone()).map(|block| block.map(Expr::Block));
+
+    let query_expr = parse_query(expr.clone()).map(|block| block.map(Expr::Query));
+
     let ident = select! {Token::Ident(s) => s};
 
     let struct_expr = ident
@@ -320,7 +300,7 @@ where
                 extra.span(),
                 Expr::LambdaFn {
                     args,
-                    body: body.map(Box::new),
+                    body: Box::new(body),
                 },
             )
         });
@@ -331,9 +311,127 @@ where
         variable,
         paren_expr,
         array_expr,
+        block_expr,
+        query_expr,
         struct_expr,
         lambda_fn,
     ));
 
     return atom;
+}
+
+fn parse_instr<'token, 'src: 'token, I, E>(
+    expr: E,
+) -> impl Parser<'token, I, Spanned<Instruction>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>>
++ Clone
+where
+    I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
+    E: Parser<'token, I, Spanned<Expr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone,
+{
+    let ty_parser = select! {
+        Token::Keyword(Keyword::FieldTy(ty)) = e => Spanned::new(e.span(), Ty::Field(ty))
+    };
+
+    let ident_parser = select! {
+        Token::Ident(ident) = e => Spanned::new(e.span(), ident.into())
+    };
+
+    just(Token::Keyword(Keyword::Let))
+        .to_span()
+        .then(ident_parser)
+        .then(
+            just(Token::Separator(Separator::Colon))
+                .ignore_then(ty_parser)
+                .or_not(),
+        )
+        .then_ignore(just(Token::Separator(Separator::Assign)))
+        .then(expr)
+        .map_with(|(((let_span, name), ty), expr), extra| {
+            Spanned::new(
+                extra.span(),
+                Instruction::Let {
+                    let_span,
+                    name,
+                    ty,
+                    expr,
+                },
+            )
+        })
+}
+
+fn parse_block<'token, 'src: 'token, I, E>(
+    expr: E,
+) -> impl Parser<'token, I, Spanned<ExprBlock>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone
+where
+    I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
+    E: Parser<'token, I, Spanned<Expr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone,
+{
+    let instr = parse_instr(expr.clone());
+
+    let expr_instr = expr.map(|e| Spanned::new(e.span, Instruction::Expr { expr: e }));
+
+    instr
+        .or(expr_instr)
+        .separated_by(just(Token::Separator(Separator::Semicolon)))
+        .collect::<Vec<_>>()
+        .then(
+            just(Token::Separator(Separator::Semicolon))
+                .ignored()
+                .or_not(),
+        )
+        .delimited_by(
+            just(Token::Separator(Separator::BraceOpen)),
+            just(Token::Separator(Separator::BraceClose)),
+        )
+        .try_map_with(|(mut instructions, last_semicolon), extra| {
+            let expr_has_semicolon = last_semicolon.is_some();
+
+            let return_expr = if !expr_has_semicolon {
+                if let Some(last_instr) = instructions.pop()
+                    && let Instruction::Expr { expr } = last_instr.value
+                {
+                    Some(Box::new(expr))
+                } else {
+                    return Err(Rich::custom(
+                        SimpleSpan::splat(0),
+                        "last instruction at end of block without semicolon is not an expr",
+                    ));
+                }
+            } else {
+                None
+            };
+
+            Ok(Spanned::new(
+                extra.span(),
+                ExprBlock {
+                    instructions,
+                    return_expr,
+                },
+            ))
+        })
+}
+
+fn parse_query<'token, 'src: 'token, I, E>(
+    expr: E,
+) -> impl Parser<'token, I, Spanned<QueryExpr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone
+where
+    I: ValueInput<'token, Token = Token<'src>, Span = SimpleSpan>,
+    E: Parser<'token, I, Spanned<Expr>, extra::Err<Rich<'token, Token<'src>, SimpleSpan>>> + Clone,
+{
+    let ident = select! {
+        Token::Ident(ident) = e => Spanned::new(e.span(), ident.into())
+    };
+
+    just(Token::Keyword(Keyword::Query))
+        .ignore_then(ident)
+        .then(just(Token::Keyword(Keyword::Where)).ignore_then(expr).or_not())
+        .map_with(|(table_name, filter), extra| {
+            Spanned::new(
+                extra.span(),
+                QueryExpr {
+                    table_name,
+                    filter: filter.map(Box::new),
+                },
+            )
+        })
 }

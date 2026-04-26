@@ -134,7 +134,7 @@ macro_rules! int_bit_match {
         }
     };
     (=> $ty:ty, $($value:ident),*, $expr:block) => {{
-        $(let $value = <$ty>::from_be_bytes($value.try_into().unwrap());)*
+        $(let $value = <$ty>::from_le_bytes($value.try_into().unwrap());)*
 
         $expr
     }};
@@ -493,7 +493,7 @@ macro_rules! impl_literal {
     ($ty:ty, $variant:ident) => {
         impl From<$ty> for Literal {
             fn from(value: $ty) -> Self {
-                Self::$variant(value.to_be_bytes())
+                Self::$variant(value.to_le_bytes())
             }
         }
     };

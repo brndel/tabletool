@@ -1,6 +1,8 @@
 pub mod query;
 pub mod expr;
-pub mod asm_code;
+// pub mod asm_code;
+pub mod compile;
+pub mod eval_lang;
 pub mod value;
 pub mod ty;
 pub mod defs;

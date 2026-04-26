@@ -109,7 +109,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
             Ty::Field(field_ty) => match field_ty {
                 FieldTy::IntI32 => {
                     let result = &self.stack[0..(IntBits::I32.bytes() as usize)];
-                    let result = i32::from_be_bytes(result.try_into().unwrap());
+                    let result = i32::from_le_bytes(result.try_into().unwrap());
                     Ok(Value::Field(FieldValue::Int(result)))
                 }
                 FieldTy::Bool => {
@@ -129,7 +129,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
                 }
                 FieldTy::RecordId { table_name } => {
                     let result = &self.stack[0..(IntBits::U128.bytes() as usize)];
-                    let result = u128::from_be_bytes(result.try_into().unwrap());
+                    let result = u128::from_le_bytes(result.try_into().unwrap());
                     Ok(Value::Field(FieldValue::RecordId {
                         id: Ulid(result),
                         table_name: table_name.clone(),
@@ -139,6 +139,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
             Ty::Record(table) => Err(format!("record type")),
             Ty::Struct(table) => Err(format!("struct type")),
             Ty::Iterator { item_ty, kind } => Err(format!("iter type")),
+            Ty::Unit => Err(format!("unit type")),
             Ty::Any => Err(format!("any type")),
         }
     }
@@ -150,7 +151,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
 
     pub fn result_i32(&self) -> i32 {
         let result = &self.stack[0..((i32::BITS / 8) as usize)];
-        i32::from_be_bytes(result.try_into().unwrap())
+        i32::from_le_bytes(result.try_into().unwrap())
     }
 
     fn get_mem_range(&self, mut offset: u32, len: u32, kind: MemRangeKind) -> Range<usize> {
@@ -280,7 +281,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
                 IntBits::U32.bytes(),
             );
 
-            let stack_pointer = u32::from_be_bytes(stack_pointer_bytes.try_into().unwrap());
+            let stack_pointer = u32::from_le_bytes(stack_pointer_bytes.try_into().unwrap());
 
             self.stack_pointer = stack_pointer;
             self.stack.truncate(self.stack_pointer as usize);
@@ -294,7 +295,7 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
             );
 
             let instruction_pointer =
-                u32::from_be_bytes(instruction_pointer_bytes.try_into().unwrap()) as usize;
+                u32::from_le_bytes(instruction_pointer_bytes.try_into().unwrap()) as usize;
 
             self.instruction_pointer = instruction_pointer;
 
@@ -311,8 +312,8 @@ impl<'code, 'record, Q: QueryProvider> AsmRuntime<'code, 'record, Q> {
 
         let value: [u8; 8] = unsafe {
             mem::transmute([
-                stack_pointer.to_be_bytes(),
-                instruction_pointer.to_be_bytes(),
+                stack_pointer.to_le_bytes(),
+                instruction_pointer.to_le_bytes(),
             ])
         };
 

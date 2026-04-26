@@ -6,13 +6,20 @@ use chumsky::Parser;
 use chumsky::error::Rich;
 use chumsky::input::Input;
 use chumsky::span::SimpleSpan;
-use db_core::expr::{Expr, LineColSpan, Spanned};
+use db_core::expr::{Expr, Spanned};
 
 use db_core::query::Query;
 
 #[derive(Debug, PartialEq)]
 pub struct ParseError {
     err: Rich<'static, String, SimpleSpan>,
+    kind: ParseErrorKind,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ParseErrorKind {
+    Lexer,
+    Parser,
 }
 
 impl ParseError {
@@ -21,7 +28,12 @@ impl ParseError {
     }
 
     pub fn content(&self) -> String {
-        self.err.reason().to_string()
+        let kind_str = match self.kind {
+            ParseErrorKind::Lexer => "LEX",
+            ParseErrorKind::Parser => "PARSE",
+        };
+
+        format!("{}: {}", kind_str, self.err.reason())
     }
 }
 
@@ -30,6 +42,7 @@ pub fn parse<'a>(query: &'a str) -> (Option<Query>, Vec<ParseError>) {
 
     let errors = lexer_errors.into_iter().map(|err| ParseError {
         err: err.map_token(|t| t.to_string()).into_owned(),
+        kind: ParseErrorKind::Lexer,
     });
 
     let Some(tokens) = tokens else {
@@ -47,6 +60,7 @@ pub fn parse<'a>(query: &'a str) -> (Option<Query>, Vec<ParseError>) {
         .into_iter()
         .map(|err| ParseError {
             err: err.map_token(|t| format!("{:?}", t)).into_owned(),
+            kind: ParseErrorKind::Parser,
         })
         .chain(errors);
 
@@ -58,6 +72,7 @@ pub fn parse_expr(input: &str) -> (Option<Spanned<Expr>>, Vec<ParseError>) {
 
     let errors = lexer_errors.into_iter().map(|err| ParseError {
         err: err.map_token(|t| t.to_string()).into_owned(),
+        kind: ParseErrorKind::Lexer,
     });
 
     let Some(tokens) = tokens else {
@@ -74,6 +89,7 @@ pub fn parse_expr(input: &str) -> (Option<Spanned<Expr>>, Vec<ParseError>) {
         .into_iter()
         .map(|err| ParseError {
             err: err.map_token(|t| format!("{:?}", t)).into_owned(),
+            kind: ParseErrorKind::Parser,
         })
         .chain(errors);
 
@@ -89,6 +105,21 @@ mod tests {
         let input = "query user where user.age > 10";
 
         let (query, errs) = parse(input);
+
+        dbg!(errs);
+        dbg!(query);
+    }
+
+    #[test]
+    fn dbg_block_parse() {
+        let input = "{
+            let v = {
+                let x = 10;
+                x + 10
+            };
+        }";
+
+        let (query, errs) = parse_expr(input);
 
         dbg!(errs);
         dbg!(query);

@@ -23,7 +23,7 @@ impl From<AsmIter> for AsmIterBytes {
     fn from(value: AsmIter) -> Self {
         AsmIterBytes {
             current_element: value.current_element.into(),
-            remaining_elements: value.remaining_elements.to_be_bytes(),
+            remaining_elements: value.remaining_elements.to_le_bytes(),
         }
     }
 }

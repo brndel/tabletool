@@ -15,7 +15,7 @@ chumsky.workspace = true
 
 # wasmtime.workspace = true
 # wasmtime = "43.0"
-wasmi = "1.0"
+# wasmi = "1.0"
 
 wasmer.workspace = true
 wasmer-types.workspace = true

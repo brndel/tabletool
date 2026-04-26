@@ -1,21 +1,19 @@
-use std::{cell::Ref, time::Instant};
+use std::time::Instant;
 
 use wasm_encoder::{
-    CodeSection, EntityType, ExportSection, FunctionSection, ImportSection, RefType, TypeSection,
+    CodeSection, EntityType, ExportSection, FunctionSection, ImportSection, TypeSection,
     ValType,
 };
 use wasmer::{
-    Function, Instance, Module, SharedMemory, Store, Value, imports, sys::NativeEngineExt,
+    Function, Instance, Store, imports, sys::NativeEngineExt,
 };
 use wasmer_types::CompilationProgressCallback;
-use wasmi::Func;
 
 fn main() {
     let module = build_module();
 
-    run_wasmi(&module);
-    println!("-----");
     run_wasmer(&module);
+
 }
 
 fn build_module() -> Vec<u8> {
@@ -64,76 +62,6 @@ fn build_module() -> Vec<u8> {
     module.section(&code_section);
 
     module.finish()
-}
-
-// In this simple example we are going to compile the below Wasm source,
-// instantiate a Wasm module from it and call its exported "hello" function.
-fn run_wasmi(module: &[u8]) {
-    let _timer = ScopeTimer::start("wasmi");
-
-    // First step is to create the Wasm execution engine with some config.
-    //
-    // In this example we are using the default configuration.
-    let engine = wasmi::Engine::default();
-
-    // Now we can compile the above Wasm module with the given Wasm source.
-    let module = {
-        let _timer = ScopeTimer::start("wasmi parse");
-
-        let wasm = r#"
-        (module
-          (import "host" "host_func" (func $host_hello (param i32)))
-
-          (type $t0 (func (param i32) (result i32)))
-          (func $add_one (export "add_one") (type $t0) (param $p0 i32) (result i32)
-            local.get $p0
-            i32.const 1
-            i32.add
-            local.tee 0
-            call $host_hello
-            local.get 0
-          )
-        )
-    "#;
-        wasmi::Module::new(&engine, module).unwrap()
-    };
-    // let module = wasmi::Module::new(&engine, module).unwrap();
-
-    let _timer = ScopeTimer::start("wasmi link");
-
-    // Wasm objects operate within the context of a Wasm `Store`.
-    //
-    // Each `Store` has a type parameter to store host specific data.
-    // In this example the host state is a simple `u32` type with value `42`.
-    type HostState = u32;
-    let mut store = wasmi::Store::new(&engine, 42);
-
-    // A linker can be used to instantiate Wasm modules.
-    // The job of a linker is to satisfy the Wasm module's imports.
-    let mut linker = <wasmi::Linker<HostState>>::new(&engine);
-    // We are required to define all imports before instantiating a Wasm module.
-    linker
-        .func_wrap(
-            "host",
-            "host_func",
-            |caller: wasmi::Caller<'_, HostState>, param: i32| {
-                println!(
-                    "Got {param} from WebAssembly and my host state is: {}",
-                    caller.data()
-                );
-            },
-        )
-        .unwrap();
-    let instance = linker.instantiate_and_start(&mut store, &module).unwrap();
-
-    let add_one = instance
-        .get_typed_func::<i32, i32>(&store, "add_one")
-        .unwrap();
-
-    let _timer = ScopeTimer::start("wasmi run");
-    let result = add_one.call(&mut store, 42).unwrap();
-
-    println!("got {result} from runtime");
 }
 
 fn run_wasmer(module: &[u8]) {

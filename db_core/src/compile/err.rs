@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[derive(Debug, Error)]
-pub enum AsmCompileErr {
+pub enum CompileErr {
     #[error("Missmatched type: expected {expected:?} but found {found:?}")]
     MissmatchedTy { expected: Ty, found: Ty },
     #[error("Invalid types for binary op {op:?}: {a:?} {b:?}")]
@@ -48,4 +48,6 @@ pub enum AsmCompileErr {
     NonFieldTyInStruct { ty: Ty },
     #[error("Any Error, we do not care at the moment :)")]
     Anything,
+    #[error("Custom Error {0}")]
+    Custom(String)
 }
